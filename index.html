@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sefirah Source Hub</title>
+<style>
+:root{--bg:#f6f5f2;--c:#fff;--t:#1d1d1f;--m:#666;--a:#5b3fd0;--b:#ddd;--ok:#1a7f37;--w:#b26a00;--e:#c62828}
+@media(prefers-color-scheme:dark){:root{--bg:#141417;--c:#1e1e23;--t:#eee;--m:#9a9aa3;--a:#9b86ff;--b:#33333a;--ok:#4cc26a;--w:#f0a63c;--e:#ff6b6b}}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{padding:12px 16px;font-weight:700;font-size:18px}nav{display:flex;gap:4px;overflow-x:auto;padding:0 12px;border-bottom:1px solid var(--b)}
+nav button{border:0;background:none;color:var(--m);padding:10px 12px;font:inherit;cursor:pointer;border-bottom:3px solid transparent;white-space:nowrap}
+nav button.on{color:var(--a);border-color:var(--a);font-weight:600}main{max-width:980px;margin:0 auto;padding:16px}
+section{display:none}section.on{display:block}
+.card{background:var(--c);border:1px solid var(--b);border-radius:10px;padding:12px;margin:8px 0}
+input,select,textarea,button.b{font:inherit;padding:8px 10px;border:1px solid var(--b);border-radius:8px;background:var(--c);color:var(--t);max-width:100%}
+textarea{width:100%;min-height:130px;font-family:monospace;font-size:12px}input[type=text],input:not([type]),input[type=url]{width:100%}
+button.b{cursor:pointer;background:var(--a);color:#fff;border-color:var(--a)}button.b.s{background:var(--c);color:var(--t);border-color:var(--b)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:6px 0}.row>*{flex:1 1 140px}.row>button{flex:0 0 auto}
+label{display:block;font-size:13px;color:var(--m);margin-top:8px}.tag{display:inline-block;font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid var(--b);color:var(--m);margin-right:4px}
+.ok{color:var(--ok)}.w{color:var(--w)}.e{color:var(--e)}pre{background:var(--bg);padding:10px;border-radius:8px;overflow:auto;max-height:55vh;font-size:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}.sp{display:inline-block;width:14px;height:14px;border:2px solid var(--b);border-top-color:var(--a);border-radius:50%;animation:r 1s linear infinite;vertical-align:middle}@keyframes r{to{transform:rotate(360deg)}}
+dialog{width:min(900px,95vw);background:var(--c);color:var(--t);border:1px solid var(--b);border-radius:10px}small{color:var(--m)}
+
+.steps{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 12px}.steps span{flex:1 1 120px;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--b);color:var(--m);background:var(--c)}.steps span b{color:var(--a)}
+.hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}.hero .card{margin:0}.hero .n{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--a);color:#fff;font-weight:700;margin-right:6px}
+.hint{display:block;font-size:12px;color:var(--m);margin:2px 0 4px}details.help{margin:6px 0;font-size:13px;color:var(--m)}details.help summary{cursor:pointer;color:var(--a)}
+.todo{list-style:none;padding:0}.todo li{padding:6px 0;border-bottom:1px solid var(--b)}.todo input{margin-right:8px}
+h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--a);color:#fff;font-size:13px;margin-right:6px}
+</style></head><body>
+<header>📚 Sefirah Source Hub <small>— sources Lua pour le plugin KOReader Sefirah</small></header>
+<nav id="nav"></nav>
+<main>
+<section id="start"><div class="card"><h2 style="margin:0 0 4px">Créer une source pour Sefirah en 4 étapes</h2>
+<p style="margin:0;color:var(--m)">Une « source » = un petit fichier <code>.lua</code> qui apprend à Sefirah à lire un site (recherche, fiche, chapitres). Pas besoin de savoir coder pour une première version.</p></div>
+<div class="hero">
+<div class="card"><span class="n">1</span><b>Choisir le site</b><br><small>Colle l'adresse du site et dis si c'est un roman ou un manga. L'outil devine les réglages.</small></div>
+<div class="card"><span class="n">2</span><b>Vérifier les réglages</b><br><small>3 à 5 champs, chacun avec une aide « où le trouver ». Tout est pré-rempli quand c'est possible.</small></div>
+<div class="card"><span class="n">3</span><b>Tester</b><br><small>Un clic lance 10 contrôles : accueil, recherche, fiche, chapitres, lecture.</small></div>
+<div class="card"><span class="n">4</span><b>Installer</b><br><small>Télécharge le fichier, copie-le dans le plugin, redémarre KOReader.</small></div></div>
+<div class="row" style="margin-top:12px"><button class="b" onclick="show('creer')">Commencer →</button><button class="b s" onclick="show('catalogue')">Voir les sources existantes</button><button class="b s" onclick="show('importer')">J'ai déjà un code à importer</button></div>
+<div class="card"><b>Avant de commencer</b><ul style="margin:6px 0 0;padding-left:18px"><li>Si le site est protégé (Cloudflare, CAPTCHA), l'outil le dira : il ne le contourne pas.</li><li>Sans proxy, la plupart des sites sont illisibles depuis le navigateur : voir <a href="#" onclick="show('tester');return false">Tester › Proxy</a> (2 minutes, gratuit).</li><li>Rien n'est envoyé nulle part : tes sources restent dans ton navigateur (« Mes sources »).</li></ul></div></section>
+
+<section id="catalogue"><div class="row"><input id="cq" placeholder="Rechercher un nom…"><select id="cl"><option value="">Toutes langues</option></select><select id="ct"><option value="">Tous types</option><option>novel</option><option>manga</option></select><select id="cs"><option value="">Tout statut</option><option>non vérifié</option><option>testé</option></select></div>
+<small id="cn"></small><div class="grid" id="cg"></div></section>
+
+<section id="importer"><div class="card"><b>Importer depuis GitHub</b><small> (dépôt public, fichier, ou dossier <code>/tree/…</code>)</small>
+<div class="row"><input id="iu" placeholder="https://github.com/unitreign/mythosext"><button class="b" id="ig">Analyser</button></div>
+<div id="ir"></div></div></section>
+
+<section id="creer"><div class="steps"><span><b>①</b> Le site</span><span><b>②</b> Les réglages</span><span><b>③</b> Générer</span><span><b>④</b> Tester et installer</span></div>
+<div class="card"><h2 class="st" style="margin-top:0"><span>1</span>Le site à ajouter</h2>
+<div class="row"><input id="cu" placeholder="https://exemple.com"><select id="cty"><option value="novel">Webnovel / light novel</option><option value="manga">Manga</option><option value="manga">Manhwa / manhua</option><option value="manga">Webtoon</option></select><button class="b" id="ca">Analyser le site</button></div>
+<small class="hint">Colle l'adresse de la page d'accueil, puis clique « Analyser le site ». Si ça échoue, passe à l'étape 2 : tu peux tout remplir à la main.</small><div id="cmsg"></div>
+<h2 class="st"><span>2</span>Les réglages</h2>
+<details class="help"><summary>Comment trouver ces infos ? (30 secondes)</summary><p>Ouvre le site dans ton navigateur. Pour chaque champ, la réponse se voit dans la barre d'adresse : ouvre une œuvre, puis un chapitre, et note ce qui ressemble à <code>/manga/</code> ou <code>/chapter/</code>. Pour la classe CSS : clic droit sur le texte du chapitre › Inspecter, repère <code>class="…"</code>.</p></details>
+<div class="row"><div><label>Nom affiché dans Sefirah</label><input id="f_name"></div><div><label>Langue (fr, en, es…)</label><input id="f_lang" value="fr"></div><div><label>Version <span class="hint" style="display:inline">(0.1.0 pour une 1re version)</span></label><input id="f_ver" value="0.1.0"></div></div>
+<label>Adresse d'une recherche</label><small class="hint">Fais une recherche sur le site, copie l'adresse, puis remplace le mot cherché par <code>{q}</code> (et le numéro de page par <code>{page}</code>).</small><input id="f_search" placeholder="https://exemple.com/search?q={q}&page={page}">
+<div class="row"><div><label>Les liens vers une œuvre contiennent</label><small class="hint">Ex. <code>/novel/</code> ou <code>/manga/</code></small><input id="f_list" placeholder="/manga/"></div><div><label>Les liens vers un chapitre contiennent</label><small class="hint">Ex. <code>/chapter/</code> ou <code>/chapitre-</code></small><input id="f_chap" placeholder="/chapter/"></div></div>
+<div class="row"><div><label>Classe CSS du texte du chapitre (romans)</label><small class="hint">Ex. <code>chapter-content</code></small><input id="f_cont" placeholder="chapter-content"></div><div><label>Classe CSS des images (mangas)</label><small class="hint">Laisse vide pour prendre toutes les images.</small><input id="f_img" placeholder="page-img"></div><div><label>Ordre des chapitres</label><small class="hint">Si le site liste le plus récent en premier, choisis « Inverser ».</small><select id="f_rev"><option value="0">Tel quel</option><option value="1">Inverser</option></select></div></div>
+<h2 class="st"><span>3</span>Générer</h2><div class="row"><button class="b" id="cg2">Générer le Lua</button><button class="b s" id="ct2">Envoyer au testeur</button></div></div>
+<div id="cout"></div></section>
+
+<section id="convertir"><div class="card"><b>Convertir une source vers Sefirah</b><small> Lua (Mythos / Sefirah) converti ; JS / Kotlin / Dart / JSON analysés → pré-remplissent « Créer ».</small>
+<div class="row"><input id="vn" placeholder="nom_du_fichier.lua"><select id="vs"><option value="">— choisir une source importée —</option></select></div>
+<textarea id="vt" placeholder="Colle ici le code source…"></textarea><div class="row"><button class="b" id="vg">Analyser / convertir</button></div></div><div id="vo"></div></section>
+
+<section id="tester"><div class="card"><b>Tester une configuration</b><small> Exécute réellement les règles dans le navigateur (pas le Lua dans KOReader).</small>
+<div class="row"><input id="t_base" placeholder="Site (https://…)"><input id="t_q" value="love" placeholder="Terme de recherche"></div>
+<div class="row"><input id="t_search" placeholder="URL de recherche avec {q} {page}"><input id="t_list" placeholder="préfixe œuvre"><input id="t_chap" placeholder="préfixe chapitre"></div>
+<div class="row"><input id="t_cont" placeholder="classe texte (roman)"><input id="t_img" placeholder="classe images (manga)"><select id="t_type"><option value="novel">roman</option><option value="manga">manga</option></select><button class="b" id="tg">Lancer</button></div>
+<div id="tr"></div></div>
+<div class="card"><b>Proxy (anti-CORS)</b><small> Optionnel. Déploie <code>proxy/worker.js</code> sur Cloudflare Workers (gratuit) et colle l'adresse.</small>
+<div class="row"><input id="px" placeholder="https://mon-proxy.mon-compte.workers.dev"><button class="b s" id="pxs">Enregistrer</button></div></div></section>
+
+<section id="mes"><div id="ml"></div></section>
+
+<section id="doc"><div class="card"><p><b>Nouveau ?</b> Commence par l'onglet <a href="#" onclick="show('start');return false">Démarrer</a>.</p><h3>Installer une source dans Sefirah</h3><ol>
+<li>Télécharge le fichier <code>.lua</code> (Catalogue ou Mes sources).</li>
+<li>Copie-le dans <code>koreader/plugins/sefirah.koplugin/extensions/</code> (le nom du fichier = l'identifiant de la source).</li>
+<li>Ajoute la ligne « metas » affichée sous le code dans <code>core/extmgr.lua</code>, dans la table <code>metas</code>.</li>
+<li>Redémarre KOReader, ouvre Sefirah › Sources, installe la source.</li></ol>
+<h3>Contrat d'une source</h3><p>Un fichier Lua retourne une table <code>ext</code> : <code>popularNovels(page, options)</code> et <code>searchNovels(term, page)</code> → <code>{novels={{name,path,cover}}}</code> ; <code>parseNovelMeta(path)</code> ; <code>parseNovel(path)</code> → fiche + <code>chapters={{name,path,chapter_number}}</code> ; <code>parseChapter(path)</code> → HTML ; pour un manga : <code>ext.type="manga"</code> et <code>parseChapterImages(path)</code> → <code>{images={…}, headers={…}}</code>. Référence : <code>extensions/mangapill.lua</code>.</p>
+<h3>Limites</h3><p>Le navigateur seul ne peut pas lire la plupart des sites (CORS) : il faut le proxy. Les sites protégés par Cloudflare / CAPTCHA sont signalés comme bloqués, jamais contournés. Les sources du catalogue sont marquées « non vérifié » tant qu'un test réel n'a pas été fait. Licence : les fichiers dérivés de Mythos restent sous GPL-3.0.</p></div></section>
+</main>
+<dialog id="dlg"><div class="row"><b id="dt"></b><button class="b s" onclick="dlg.close()">Fermer</button></div><pre id="dc"></pre></dialog>
+<script>
+const $=s=>document.querySelector(s),H=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TABS=[['start','Démarrer'],['creer','Créer une source'],['catalogue','Catalogue'],['importer','Importer']  ,['convertir','Convertir'],['tester','Tester'],['mes','Mes sources'],['doc','Documentation']];
+const nav=$('#nav');TABS.forEach(([id,l])=>{const b=document.createElement('button');b.textContent=l;b.onclick=()=>show(id);b.dataset.id=id;nav.append(b)});
+function show(id){document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==id));nav.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.id==id));if(id=='mes')renderMine();location.hash=id}
+const LS={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{alert('Stockage local indisponible')}}};
+const mine=()=>LS.get('mine',{});const saveMine=(n,c)=>{const m=mine();m[n]=c;LS.set('mine',m);fillSel()};
+async function cp(t,b){try{await navigator.clipboard.writeText(t);b.textContent='Copié ✔'}catch{prompt('Copie :',t)}}
+function dl(name,text){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'}));a.download=name;a.click()}
+function viewCode(t,c){$('#dt').textContent=t;$('#dc').textContent=c;dlg.showModal()}
+// ---------- réseau
+$('#px').value=LS.get('px','');$('#pxs').onclick=()=>{LS.set('px',$('#px').value.trim());alert('Enregistré')};
+async function getPage(url){const px=LS.get('px','');let err;
+ try{const r=await fetch(url);return {status:r.status,text:await r.text()}}catch(e){err=e}
+ if(!px)throw new Error("Accès bloqué par le navigateur (CORS). Solution : déployer proxy/worker.js (gratuit) et l'enregistrer dans l'onglet Tester.");
+ const r=await fetch(px+'?url='+encodeURIComponent(url));return {status:r.status,text:await r.text()}}
+const blocked=p=>(p.status==403||p.status==503||p.status==429)&&/cloudflare|just a moment|captcha|attention required/i.test(p.text);
+const dom=h=>new DOMParser().parseFromString(h,'text/html');
+// ---------- catalogue
+let SRC=[];
+fetch('sources/manifest.json').then(r=>r.json()).then(j=>{SRC=j.sources;[...new Set(SRC.map(s=>s.lang))].sort().forEach(l=>$('#cl').append(new Option(l,l)));cat()}).catch(()=>$('#cn').textContent='Manifeste introuvable (ouvre le site via GitHub Pages ou un serveur local).');
+function cat(){const q=$('#cq').value.toLowerCase(),l=$('#cl').value,t=$('#ct').value,s=$('#cs').value;
+ const L=SRC.filter(x=>(!q||x.name.toLowerCase().includes(q))&&(!l||x.lang==l)&&(!t||x.type==t)&&(!s||x.status==s));
+ $('#cn').textContent=L.length+' source(s)';
+ $('#cg').innerHTML=L.map(x=>`<div class="card"><b>${H(x.name)}</b> <small>v${H(x.version)}</small><br><span class="tag">${H(x.lang)}</span><span class="tag">${H(x.type)}</span><span class="tag">${H(x.license)}</span><span class="tag ${x.status=='testé'?'ok':'w'}">${H(x.status)}</span><br><small><a href="${H(x.site)}" target="_blank" rel="noopener">${H(x.site)}</a><br>Dernière vérif. : ${x.lastCheck||'jamais'}</small>
+ <div class="row"><button class="b s" data-a="v" data-i="${x.id}">Code</button><button class="b s" data-a="d" data-i="${x.id}">Télécharger</button><button class="b s" data-a="c" data-i="${x.id}">Copier le lien</button></div></div>`).join('')}
+['cq','cl','ct','cs'].forEach(i=>$('#'+i).oninput=cat);
+$('#cg').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const x=SRC.find(s=>s.id==b.dataset.i);
+ if(b.dataset.a=='c'){const u=new URL(x.file,location.href).href;try{await navigator.clipboard.writeText(u);b.textContent='Copié ✔'}catch{prompt('Lien :',u)}return}
+ const t=await (await fetch(x.file)).text();b.dataset.a=='v'?viewCode(x.id+'.lua',t):dl(x.id+'.lua',t)};
+// ---------- importer
+const LANG={lua:'Lua',js:'JavaScript',ts:'TypeScript',kt:'Kotlin',dart:'Dart',json:'JSON'};let IMP=[];
+const ext=p=>(p.split('.').pop()||'').toLowerCase();
+$('#ig').onclick=async()=>{const out=$('#ir');out.innerHTML='<span class="sp"></span> Analyse…';
+ try{let u=$('#iu').value.trim().replace(/\/$/,'');const m=u.match(/github\.com\/([^\/]+)\/([^\/]+?)(?:\.git)?(?:\/(blob|tree)\/([^\/]+)\/?(.*))?$/);
+  if(/raw\.githubusercontent\.com/.test(u)){IMP=[{path:u.split('/').pop(),raw:u}];return renderImp({license:'inconnue',repo:u})}
+  if(!m)throw new Error('URL GitHub non reconnue.');
+  const [,o,r,kind,br0,sub=''] = m;
+  const info=await (await fetch(`https://api.github.com/repos/${o}/${r}`)).json();if(info.message)throw new Error('GitHub : '+info.message+' (limite de 60 requêtes/h sans jeton ?)');
+  const br=br0||info.default_branch,lic=info.license?.spdx_id||'non déclarée';
+  if(kind=='blob'){IMP=[{path:sub,raw:`https://raw.githubusercontent.com/${o}/${r}/${br}/${sub}`}]}
+  else{const t=await (await fetch(`https://api.github.com/repos/${o}/${r}/git/trees/${br}?recursive=1`)).json();
+   IMP=(t.tree||[]).filter(f=>f.type=='blob'&&LANG[ext(f.path)]&&f.path.startsWith(sub)).map(f=>({path:f.path,raw:`https://raw.githubusercontent.com/${o}/${r}/${br}/${f.path}`}));
+   if(t.truncated)out.innerHTML='<p class="w">Dépôt très gros : liste tronquée.</p>'}
+  renderImp({license:lic,repo:`${o}/${r}`})}catch(e){out.innerHTML=`<p class="e">✘ ${H(e.message)}</p>`}};
+function renderImp(meta){const have=new Set([...SRC.map(s=>s.id),...Object.keys(mine())].map(s=>s.toLowerCase()));
+ $('#ir').innerHTML=`<p><b>${H(meta.repo)}</b> — licence : <span class="tag">${H(meta.license)}</span> ${IMP.length} fichier(s)</p>`+
+ (IMP.length?`<div class="row"><button class="b s" id="ia">Tout cocher</button><button class="b" id="ii">Importer la sélection</button></div>`:'<p class="w">Aucun fichier source reconnu.</p>')+
+ IMP.map((f,i)=>{const n=f.path.split('/').pop(),dup=have.has(n.replace(/\.[^.]+$/,'').toLowerCase())||have.has(n.toLowerCase());
+ return `<label style="color:inherit"><input type="checkbox" data-i="${i}" ${dup?'':'checked'}> ${H(f.path)} <span class="tag">${LANG[ext(f.path)]||'autre'}</span>${dup?'<span class="tag w">doublon</span>':''}</label>`}).join('');
+ if(!IMP.length)return;$('#ia').onclick=()=>document.querySelectorAll('#ir input').forEach(c=>c.checked=true);
+ $('#ii').onclick=async()=>{let ok=0,ko=[];for(const c of document.querySelectorAll('#ir input:checked')){const f=IMP[c.dataset.i];try{const r=await fetch(f.raw);if(!r.ok)throw 0;saveMine(f.path.split('/').pop(),await r.text());ok++}catch{ko.push(f.path)}}
+  alert(ok+' importé(s) → onglet Mes sources.'+(ko.length?'\nÉchecs : '+ko.join(', '):''))}}
+// ---------- créer
+$('#ca').onclick=async()=>{const u=$('#cu').value.trim();const o=$('#cmsg');o.innerHTML='<span class="sp"></span>';
+ try{const p=await getPage(u);if(blocked(p))throw new Error('Site protégé (Cloudflare/CAPTCHA) : non contourné. Utilise une autre source ou le mode manuel avec une page enregistrée.');
+  if(p.status>=400||p.text.length<300)throw new Error('Réponse vide ou erreur HTTP '+p.status);
+  const d=dom(p.text),base=new URL(u).origin,seg={};
+  d.querySelectorAll('a[href]').forEach(a=>{try{const x=new URL(a.getAttribute('href'),base);if(x.origin!=base)return;const s=x.pathname.split('/').filter(Boolean);if(s.length>=2){const k='/'+s[0]+'/';seg[k]=(seg[k]||0)+1}}catch{}});
+  const top=Object.entries(seg).sort((a,b)=>b[1]-a[1]).slice(0,4);
+  $('#f_name').value=$('#f_name').value||(d.querySelector('meta[property="og:site_name"]')?.content||d.title||'').slice(0,40);
+  const f=d.querySelector('form[action*=search],form[role=search]');if(f){const i=f.querySelector('input[name]');if(i)$('#f_search').value=new URL(f.getAttribute('action')||'/',base).href+'?'+i.name+'={q}'}
+  if(top[0])$('#f_list').value=top[0][0];
+  o.innerHTML=`<p class="ok">✔ Page lue (${p.text.length} car.). Préfixes de liens fréquents : ${top.map(t=>`<code>${H(t[0])}</code>×${t[1]}`).join(', ')||'aucun'}.</p><p class="w">Suggestions pré-remplies : vérifie-les, puis complète le préfixe chapitre et la classe du contenu (ouvre un chapitre dans ton navigateur › inspecter).</p>`;
+ }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p><p>Mode manuel : remplis les champs ci-dessous.</p>`}};
+const cfg=()=>({base:(()=>{try{return new URL($('#cu').value).origin}catch{return ''}})(),name:$('#f_name').value||'MaSource',lang:$('#f_lang').value||'multi',ver:$('#f_ver').value||'0.1.0',type:$('#cty').value,search:$('#f_search').value,list:$('#f_list').value,chap:$('#f_chap').value,cont:$('#f_cont').value,img:$('#f_img').value,rev:$('#f_rev').value=='1'});
+const lp=s=>s.replace(/[^%w]/g,m=>'%'+m),ls=s=>String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+function genLua(c){const id=c.name.toLowerCase().replace(/[^a-z0-9]/g,'')||'source',man=c.type=='manga';
+return {id,code:`-- ${c.name} — source générée par Sefirah Source Hub (modèle sans IA). À relire et tester.
+-- Contrat : voir extensions/mangapill.lua du plugin Sefirah.
+local logger = require("logger")
+local BASE   = "${ls(c.base)}"
+local SEARCH = "${ls(c.search)}"
+local LISTP  = "${ls(c.list)}"
+local CHAPP  = "${ls(c.chap)}"
+local UA = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36"
+
+local function get(p)
+    local url = p:match("^https?://") and p or (BASE .. p)
+    local body, code = require("core.net").get(url, { headers = { ["User-Agent"] = UA, ["Referer"] = BASE .. "/" }, timeout = 15 })
+    if body and #body > 2 then return body end
+    logger.warn("${ls(c.name)}: échec", url, tostring(code))
+    return nil, tostring(code)
+end
+local function dec(s) return (s:gsub("&amp;","&"):gsub("&quot;",'"'):gsub("&#39;","'"):gsub("&lt;","<"):gsub("&gt;",">"):gsub("&nbsp;"," ")) end
+local function txt(h) return (dec((h or ""):gsub("<[^>]+>"," ")):gsub("%s+"," "):match("^%s*(.-)%s*$")) end
+local function attr(tag, n) return tag:match("%f[%w_%-]" .. n:gsub("%-","%%-") .. '%s*=%s*"([^"]*)"') end
+local function abs(u) if not u then return nil end if u:sub(1,2)=="//" then return "https:"..u end if u:sub(1,1)=="/" then return BASE..u end return u end
+local function enc(s) return (tostring(s):gsub("([^%w%-%._~])", function(c) return string.format("%%%02X", c:byte()) end)) end
+local function rel(h) return (h:gsub("^"..BASE:gsub("%p","%%%0"), "")) end
+
+local function parse_list(html)
+    local out, seen = {}, {}
+    for tag, inner in html:gmatch("(<a%s[^>]->)(.-)</a>") do
+        local href = attr(tag, "href")
+        if href and href:find(LISTP, 1, true) and not seen[href] then
+            local img = inner:match("<img[^>]->")
+            local name = attr(tag, "title") or (img and attr(img, "alt")) or txt(inner)
+            if name and name ~= "" then
+                seen[href] = true
+                out[#out+1] = { name = dec(name), path = rel(href), cover = img and abs(attr(img, "data-src") or attr(img, "src")) or nil }
+            end
+        end
+    end
+    return out
+end
+
+local ext = { id = "${id}", name = "${ls(c.name)}", site = BASE, lang = "${ls(c.lang)}", version = "${ls(c.ver)}",${man?'\n    type = "manga",':''}
+    popularFilters = {}, searchFilters = {}, hasReviews = false, chapterCommentsPanel = false }
+
+function ext:popularNovels(page)
+    local html, err = get(BASE .. "/")
+    if not html then return { novels = {}, error = "Site injoignable (" .. tostring(err) .. ")" } end
+    return { novels = parse_list(html) }
+end
+
+function ext:searchNovels(term, page)
+    term = tostring(term or ""):match("^%s*(.-)%s*$")
+    if term == "" then return ext:popularNovels(page) end
+    local url = SEARCH:gsub("{q}", function() return enc(term) end):gsub("{page}", function() return tostring(page or 1) end)
+    local html, err = get(url)
+    if not html then return { novels = {}, error = "Recherche impossible (" .. tostring(err) .. ")" } end
+    return { novels = parse_list(html) }
+end
+
+local function meta(html, path)
+    local t = html:match("<h1[^>]*>(.-)</h1>")
+    return { name = t and txt(t) or path, path = path,
+        cover = abs(html:match('property="og:image"[^>]-content="([^"]*)"')),
+        summary = dec(html:match('property="og:description"[^>]-content="([^"]*)"') or ""), author = "", status = "", genres = {} }
+end
+
+function ext:parseNovelMeta(path)
+    local html = get(path); if not html then return nil end
+    local m = meta(html, path); m.total_chapters = 0; return m
+end
+
+function ext:parseNovel(path)
+    local html = get(path); if not html then return nil end
+    local m, ch, seen = meta(html, path), {}, {}
+    for tag, inner in html:gmatch("(<a%s[^>]->)(.-)</a>") do
+        local href = attr(tag, "href")
+        if href and href:find(CHAPP, 1, true) and not seen[href] then
+            seen[href] = true
+            ch[#ch+1] = { name = txt(inner), path = rel(href) }
+        end
+    end
+${c.rev?'    for i = 1, math.floor(#ch/2) do ch[i], ch[#ch+1-i] = ch[#ch+1-i], ch[i] end\n':''}    for i, c in ipairs(ch) do c.chapter_number = i end
+    m.chapters, m.totalPages = ch, 1
+    return m
+end
+${man?`
+function ext:parseChapterImages(path)
+    local html, err = get(path); if not html then return nil, "chapter_unreachable" end
+    local images, seen = {}, {}
+    for tag in html:gmatch("<img[^>]->") do
+        local cls = attr(tag, "class") or ""
+        if ("${ls(c.img)}" == "" or cls:find("${ls(c.img)}", 1, true)) then
+            local u = abs(attr(tag, "data-src") or attr(tag, "src"))
+            if u and not seen[u] and not u:find("logo", 1, true) then seen[u] = true; images[#images+1] = u end
+        end
+    end
+    if #images == 0 then return nil, "no_pages" end
+    return { images = images, headers = { ["User-Agent"] = UA, ["Referer"] = BASE .. "/" } }
+end
+
+function ext:parseChapter(path) return "<p>Ce chapitre est un manga : il s'ouvre dans le lecteur d'images.</p>" end
+`:`
+function ext:parseChapter(path)
+    local html = get(path); if not html then return "<p>Chapitre injoignable.</p>" end
+    -- LIMITE : le motif s'arrête au premier </div> ; si le texte contient des <div> imbriqués, ajuste ici.
+    local body = html:match('<div[^>]-class="[^"]-${lp(c.cont)}[^"]-"[^>]*>(.-)</div>')
+    if not body or #body < 50 then return "<p>Texte du chapitre introuvable (classe « ${ls(c.cont)} »).</p>" end
+    body = body:gsub("<script.-<\/script>", ""):gsub("<style.-</style>", "")
+    return body
+end
+`}
+return ext
+`,meta:`{ id = "${id}", name = "${ls(c.name)}", site = "${ls(c.base)}", lang = "${ls(c.lang)}", version = "${ls(c.ver)}", runtime = "lua"${man?', type = "manga"':''} },`}}
+$('#cg2').onclick=()=>{const c=cfg(),miss=[];if(!c.base)miss.push("URL du site");if(!c.search)miss.push("URL de recherche");if(!c.list)miss.push("préfixe œuvre");if(!c.chap)miss.push("préfixe chapitre");if(c.type=='novel'&&!c.cont)miss.push("classe du texte");
+ if(miss.length)return $('#cout').innerHTML=`<p class="e">Champs manquants : ${miss.join(', ')}</p>`;
+ const g=genLua(c);saveMine(g.id+'.lua',g.code);window._g=g;
+ $('#cout').innerHTML=`<div class="card"><p class="ok">✔ Fichier généré et ajouté à « Mes sources ».</p><div class="row"><button class="b" onclick="dl('${g.id}.lua',_g.code)">Télécharger ${g.id}.lua</button></div>
+ <h2 class="st"><span>4</span>Tester et installer</h2><ul class="todo"><li><label style="margin:0;color:inherit"><input type="checkbox">Clique « Envoyer au testeur » plus haut, puis « Lancer » (vérifie que le site répond et que les chapitres sont trouvés).</label></li><li><label style="margin:0;color:inherit"><input type="checkbox">Télécharge <code>${g.id}.lua</code> et copie-le dans <code>koreader/plugins/sefirah.koplugin/extensions/</code>.</label></li><li><label style="margin:0;color:inherit"><input type="checkbox">Ajoute cette ligne dans <code>core/extmgr.lua</code>, dans la table <code>metas</code> : <button class="b s" onclick="cp(_g.meta,this)">Copier la ligne</button></label><pre>${H(g.meta)}</pre></li><li><label style="margin:0;color:inherit"><input type="checkbox">Redémarre KOReader › Sefirah › Sources › installe la source.</label></li></ul><p class="w">À faire à la main : vérifier les sélecteurs sur le vrai site, nom/genre/auteur de la fiche, filtres de « Parcourir » (non générés). Le code n'est pas testé tant que tu ne l'as pas essayé dans KOReader.</p><pre>${H(g.code)}</pre></div>`};
+$('#ct2').onclick=()=>{const c=cfg();$('#t_base').value=c.base;$('#t_search').value=c.search;$('#t_list').value=c.list;$('#t_chap').value=c.chap;$('#t_cont').value=c.cont;$('#t_img').value=c.img;$('#t_type').value=c.type;show('tester')};
+// ---------- convertir
+function fillSel(){const s=$('#vs');s.innerHTML='<option value="">— choisir une source importée —</option>'+Object.keys(mine()).map(k=>`<option>${H(k)}</option>`).join('')}fillSel();
+$('#vs').onchange=e=>{if(e.target.value){$('#vn').value=e.target.value;$('#vt').value=mine()[e.target.value]}};
+$('#vg').onclick=()=>{const n=$('#vn').value.trim()||'source.lua',t=$('#vt').value,o=$('#vo'),e=ext(n);if(!t.trim())return o.innerHTML='<p class="e">Colle du code ou choisis une source.</p>';
+ const lang=LANG[e]||(/^\s*(local |function |--)/m.test(t)?'Lua':'inconnu');
+ if(lang=='Lua'){const need=['popularNovels','searchNovels','parseNovelMeta','parseNovel','parseChapter'],has=m=>new RegExp('function\\s+\\w+[:.]'+m+'\\b|'+m+'\\s*=\\s*function').test(t),miss=need.filter(m=>!has(m));
+  const mods=[...t.matchAll(/require\(\s*["']([^"']+)["']\s*\)/g)].map(m=>m[1]),okm=/^(logger|core\.|ffi|json|socket|ltn12|lfs|libs\/)/,bad=[...new Set(mods)].filter(m=>!okm.test(m));
+  const man=/type\s*=\s*["']manga["']/.test(t),img=has('parseChapterImages'),gpl=/GPL/.test(t.slice(0,600));
+  const id=n.replace(/\.lua$/,'').toLowerCase().replace(/[^a-z0-9]/g,''),site=(t.match(/https?:\/\/[^"'\s\/]+/)||[''])[0],name=(t.match(/name\s*=\s*"([^"]+)"/)||[0,id])[1];
+  const L=l=>`<li class="${l[0]}">${l[1]}</li>`,r=[];
+  r.push(['ok','Langage : Lua']);miss.length?r.push(['e','Méthodes manquantes (intervention manuelle) : '+miss.join(', ')]):r.push(['ok','Les 5 méthodes obligatoires sont présentes']);
+  if(man&&!img)r.push(['e','Source manga sans parseChapterImages']);if(img&&!man)r.push(['w','parseChapterImages présent mais ext.type="manga" absent']);
+  bad.length?r.push(['w','Modules non fournis par Sefirah (à adapter) : '+bad.join(', ')]):r.push(['ok','Modules utilisés compatibles : '+(mods.join(', ')||'aucun')]);
+  const out=(gpl?'':'-- Source importée via Sefirah Source Hub. Conserver les mentions de licence/copyright d\'origine.\n')+t;
+  o.innerHTML=`<div class="card"><ul>${r.map(L).join('')}</ul><p>Le code n'est <b>pas modifié</b> au-delà de cette vérification (aucune réécriture silencieuse).</p><div class="row"><button class="b" id="vd">Télécharger ${H(id)}.lua</button><button class="b s" id="vm">Enregistrer dans Mes sources</button></div>
+  <p><b>Ligne pour <code>core/extmgr.lua</code> :</b></p><pre>${H(`{ id = "${id}", name = "${name}", site = "${site}", lang = "multi", version = "0.1.0", runtime = "lua"${man?', type = "manga"':''} },`)}</pre></div>`;
+  $('#vd').onclick=()=>dl(id+'.lua',out);$('#vm').onclick=()=>{saveMine(id+'.lua',out);alert('Enregistré')}}
+ else{const urls=[...new Set(t.match(/https?:\/\/[^\s"'`)<>]+/g)||[])].slice(0,12),nm=(t.match(/(?:name|sourceName)\s*[:=]\s*["']([^"']+)/)||[])[1];
+  o.innerHTML=`<div class="card"><p class="e">✘ Conversion automatique impossible : le code ${H(lang)} dépend d'API propres à son application (Jsoup/OkHttp, runtime JS, etc.) sans équivalent direct dans Sefirah.</p><p class="w">Conversion partielle : informations extraites pour pré-remplir « Créer ».</p><ul><li>Nom : ${H(nm||'?')}</li>${urls.map(u=>`<li>${H(u)}</li>`).join('')}</ul><button class="b" id="vp">Pré-remplir « Créer »</button><p><small>Vérifie aussi la licence du projet d'origine avant de t'en inspirer.</small></p></div>`;
+  $('#vp').onclick=()=>{$('#cu').value=urls[0]||'';$('#f_name').value=nm||'';show('creer')}}};
+// ---------- tester
+$('#tg').onclick=async()=>{const o=$('#tr'),R=[],add=(k,m)=>{R.push([k,m]);draw()},draw=()=>o.innerHTML='<ul>'+R.map(r=>`<li class="${r[0]}">${{ok:'✔',w:'⚠',e:'✘',s:'⏭'}[r[0]]} ${H(r[1])}</li>`).join('')+'</ul><p><small>Exécuté '+new Date().toLocaleString('fr-FR')+' dans le navigateur.</small></p>';
+ const base=$('#t_base').value.trim().replace(/\/$/,''),list=$('#t_list').value,chap=$('#t_chap').value,man=$('#t_type').value=='manga';o.innerHTML='<span class="sp"></span> Tests en cours…';
+ const links=(d,pre)=>[...d.querySelectorAll('a[href]')].filter(a=>(a.getAttribute('href')||'').includes(pre));const abs=(h)=>new URL(h,base+'/').href;
+ const moji=t=>/Ã©|Ã¨|Ã |â€™|\uFFFD/.test(t);
+ try{const p=await getPage(base+'/');if(blocked(p))return add('e','Site protégé (Cloudflare/CAPTCHA) : non contourné, test impossible.');
+  p.status<400?add('ok','Le site répond (HTTP '+p.status+')'):add('e','HTTP '+p.status);if(p.text.length<500)add('w','Page d\'accueil quasi vide ('+p.text.length+' car.)');
+  moji(p.text)?add('e','Accents mal encodés (mojibake) détectés'):add('ok','Encodage : pas de caractères corrompus');
+  const h=links(dom(p.text),list);h.length?add('ok','Accueil : '+h.length+' liens d\'œuvres'):add('w','Accueil : aucun lien contenant « '+list+' »');
+  let first;const su=$('#t_search').value;if(!su)add('s','Recherche non testée (URL absente)');else{const q=await getPage(su.replace('{q}',encodeURIComponent($('#t_q').value)).replace('{page}','1'));if(blocked(q))add('e','Recherche bloquée (anti-bot)');else{const l=links(dom(q.text),list);l.length?(add('ok','Recherche : '+l.length+' résultats'),first=l[0].getAttribute('href')):add('w','Recherche : 0 résultat (page vide ?)')}}
+  if(!first){const l=h;if(l[0])first=l[0].getAttribute('href')}
+  if(!first)return add('s','Fiche, chapitres et lecture non testés : aucune œuvre trouvée');
+  const f=await getPage(abs(first));const fd=dom(f.text);const t=fd.querySelector('h1')?.textContent.trim();t?add('ok','Fiche : titre « '+t.slice(0,50)+' »'):add('w','Fiche : pas de <h1>');
+  fd.querySelector('meta[property="og:image"]')?add('ok','Fiche : couverture (og:image) trouvée'):add('w','Fiche : pas de couverture og:image');
+  const cl=links(fd,chap);if(!cl.length)return add('e','Aucun lien de chapitre contenant « '+chap+' »');add('ok','Chapitres : '+cl.length+' liens');
+  const nums=cl.map(a=>+(a.textContent.match(/(\d+(?:\.\d+)?)\s*$/)||a.textContent.match(/(\d+(?:\.\d+)?)/)||[])[1]).filter(x=>!isNaN(x));
+  if(nums.length<2)add('w','Ordre : numéros non détectables');else{const up=nums.every((x,i)=>!i||x>=nums[i-1]),dn=nums.every((x,i)=>!i||x<=nums[i-1]);up?add('ok','Ordre : croissant'):dn?add('w','Ordre : décroissant → choisis « Inverser » dans Créer'):add('w','Ordre : mélangé, à vérifier')}
+  const c=await getPage(abs(cl[0].getAttribute('href')));if(blocked(c))return add('e','Page de lecture bloquée (anti-bot)');const cd=dom(c.text);
+  if(man){const ic=$('#t_img').value,im=[...cd.querySelectorAll('img')].filter(i=>!ic||(i.className||'').includes(ic));im.length?add('ok','Lecture : '+im.length+' images'):add('e','Lecture : aucune image'+(ic?' avec la classe « '+ic+' »':''));
+   if(im[0]){const u=new URL(im[0].getAttribute('data-src')||im[0].getAttribute('src'),base+'/').href;try{const r=await getPage(u);r.status<400?add('ok','Image 1 accessible (HTTP '+r.status+')'):add('e','Image 1 : HTTP '+r.status)}catch{add('w','Image 1 : accessibilité non vérifiable depuis le navigateur (Referer/CORS)')}}}
+  else{const cc=$('#t_cont').value,el=cc&&cd.querySelector('[class*="'+cc+'"]');if(!el)add('e','Lecture : conteneur « '+cc+' » introuvable');else{const n=el.textContent.trim().length;n>500?add('ok','Lecture : texte extrait ('+n+' car.)'):add('w','Lecture : texte très court ('+n+' car.)');el.querySelector('div')&&add('w','Le conteneur contient des <div> imbriquées : le motif Lua généré peut couper le texte')}}
+ }catch(e){add('e',e.message)}};
+// ---------- mes sources
+function renderMine(){const m=mine(),k=Object.keys(m);$('#ml').innerHTML=k.length?k.map(n=>`<div class="card"><b>${H(n)}</b> <small>${m[n].length} car.</small><div class="row"><button class="b s" data-a="v" data-n="${H(n)}">Code</button><button class="b s" data-a="d" data-n="${H(n)}">Télécharger</button><button class="b s" data-a="c" data-n="${H(n)}">Convertir</button><button class="b s" data-a="x" data-n="${H(n)}">Supprimer</button></div></div>`).join(''):'<p>Aucune source. Utilise Importer ou Créer.</p>'}
+$('#ml').onclick=e=>{const b=e.target.closest('button');if(!b)return;const n=b.dataset.n,m=mine();({v:()=>viewCode(n,m[n]),d:()=>dl(n,m[n]),c:()=>{$('#vn').value=n;$('#vt').value=m[n];show('convertir')},x:()=>{if(confirm('Supprimer '+n+' ?')){delete m[n];LS.set('mine',m);renderMine();fillSel()}}})[b.dataset.a]()};
+show(TABS.some(t=>t[0]==location.hash.slice(1))?location.hash.slice(1):'start');
+</script></body></html>
