@@ -1,29 +1,30 @@
 # Sefirah Source Hub
 
-Application web (HTML/JS pur, sans build, sans terminal) pour trouver, importer, convertir, créer et tester des sources Lua du plugin KOReader **Sefirah**.
+A web app (plain HTML/JS, no build step, no terminal) to find, import, convert, create and test Lua sources for the **Sefirah** KOReader plugin.
 
-## Mettre en ligne gratuitement (sans terminal)
-1. Crée un compte GitHub, puis un dépôt public `sefirah-source-hub`.
-2. « Add file › Upload files » : glisse tout le contenu de ce dossier (y compris `.github`) et valide.
-3. Dépôt › Settings › Pages › Source : **GitHub Actions**. Le site sera sur `https://<ton-compte>.github.io/sefirah-source-hub/`.
-   Limites GitHub Pages gratuit : dépôt public, ~1 Go de site, ~100 Go/mois de trafic (à vérifier sur la doc GitHub).
-4. (Pour lire les sites) Cloudflare › Workers & Pages › Create Worker › colle `proxy/worker.js` › Deploy. Offre gratuite : ~100 000 requêtes/jour (à vérifier). Colle l'adresse dans l'onglet **Tester › Proxy**.
+## Put it online for free (no terminal)
+1. Create a GitHub account, then a public repository named `sefirah-source-hub`.
+2. "Add file › Upload files": drag in the whole content of this folder (including `.github`) and commit.
+3. Repository › Settings › Pages › Source: **GitHub Actions**. Your site will be at `https://<your-account>.github.io/sefirah-source-hub/`.
+   Free GitHub Pages limits: public repository, ~1 GB site size, ~100 GB/month bandwidth (check the GitHub docs).
+4. (To read other sites) Cloudflare › Workers & Pages › Create Worker › paste `proxy/worker.js` › Deploy. Free plan: ~100,000 requests/day (check Cloudflare's docs). Paste the Worker address in **Test › Proxy** (tab "Tester").
 
-## Ce qui fonctionne réellement
-- **Catalogue** : 22 sources Lua réelles de ton plugin (manifeste `sources/manifest.json`), recherche/filtres, voir le code, télécharger, copier le lien. Statut « non vérifié » partout : aucun test réel n'a encore été enregistré.
-- **Importer** : dépôt/dossier/fichier GitHub public via l'API GitHub (60 requêtes/h sans jeton), langage, licence, doublons, import multiple.
-- **Convertir** : Lua → vérification du contrat Sefirah, modules incompatibles, ligne `metas` ; JS/Kotlin/Dart → analyse partielle + pré-remplissage de « Créer ».
-- **Créer** : détection de préfixes de liens et du formulaire de recherche, mode manuel, génération Lua (roman ou manga), sans IA.
-- **Tester** : 10 contrôles réels (accueil, recherche, fiche, ordre des chapitres, lecture, images, accents, pages vides, blocage anti-bot).
+## What really works
+- **Start**: a guided 4-step overview (choose the site, check the settings, test, install).
+- **Catalogue**: 22 real Lua sources from your plugin (manifest `sources/manifest.json`), search/filters, view the code, download, copy the link. Status is "unverified" everywhere: no real test has been recorded yet.
+- **Import**: a public GitHub repository, folder or file through the GitHub API (60 requests/hour without a token); language, license and duplicate detection; multi-import.
+- **Convert**: Lua → checks the Sefirah contract, incompatible modules and the `metas` line; JS/Kotlin/Dart → partial analysis and pre-filling of "Create".
+- **Create**: detection of link prefixes and the search form, manual mode, Lua generation (novel or manga), no AI. Each field has a hint, and a checklist (test, copy the file, add the `metas` line, restart KOReader) appears after generation.
+- **Test**: 10 real checks (home page, search, details page, chapter order, reading, images, accents, empty pages, anti-bot blocking).
 
-## À configurer
-- Proxy Cloudflare (sinon la plupart des sites échouent à cause de CORS).
+## To configure
+- Cloudflare proxy (otherwise most sites fail because of CORS).
 
-## Reste à développer
-- Conversion automatique de JS (LNReader) / Kotlin (Keiyoushi) : impossible en général, seule l'extraction d'infos existe.
-- Filtres « Parcourir », auteur/genres/statut dans les sources générées.
-- Catalogue communautaire par Pull Request : ajouter `sources/<id>.lua` + une entrée dans `manifest.json`.
-- Analyse par IA optionnelle (non implémentée ; une clé devrait rester côté proxy, jamais dans le frontend).
+## Still to develop
+- Automatic conversion of JS (LNReader) / Kotlin (Keiyoushi) sources: impossible in general, only information extraction exists.
+- "Browse" filters, author/genres/status in generated sources.
+- Community catalogue via Pull Request: add `sources/<id>.lua` + an entry in `manifest.json`.
+- Optional AI analysis (not implemented; an API key would have to stay on the proxy side, never in the frontend).
 
-## Licences
-Les sources dérivées de Mythos (unitreign) restent sous **GPL-3.0** ; conserve les en-têtes.
+## Licenses
+Sources derived from Mythos (unitreign) remain under **GPL-3.0**; keep the headers.
