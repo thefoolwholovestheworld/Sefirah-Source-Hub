@@ -47,14 +47,20 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 
 <section id="creer"><div class="steps"><span><b>①</b> Le site</span><span><b>②</b> Les réglages</span><span><b>③</b> Générer</span><span><b>④</b> Tester et installer</span></div>
 <div class="card"><h2 class="st" style="margin-top:0"><span>1</span>Le site à ajouter</h2>
-<div class="row"><input id="cu" placeholder="https://exemple.com"><select id="cty"><option value="novel">Webnovel / light novel</option><option value="manga">Manga</option><option value="manga">Manhwa / manhua</option><option value="manga">Webtoon</option></select><button class="b" id="ca">Analyser le site</button></div>
+<div class="row"><input id="cu" placeholder="https://exemple.com"><button class="b" id="ca">Analyser le site</button></div>
+<label>Types de contenu du site <span class="hint" style="display:inline">(coche tout ce qui s'applique)</span></label>
+<div class="row" style="gap:20px"><label style="margin:0;color:inherit"><input type="checkbox" id="ty_novel" checked> Webnovel / light novel</label><label style="margin:0;color:inherit"><input type="checkbox" id="ty_manga"> Manga / manhwa / webtoon</label></div>
 <small class="hint">Colle l'adresse de la page d'accueil, puis clique « Analyser le site ». Si ça échoue, passe à l'étape 2 : tu peux tout remplir à la main.</small><div id="cmsg"></div>
 <h2 class="st"><span>2</span>Les réglages</h2>
 <details class="help"><summary>Comment trouver ces infos ? (30 secondes)</summary><p>Ouvre le site dans ton navigateur. Pour chaque champ, la réponse se voit dans la barre d'adresse : ouvre une œuvre, puis un chapitre, et note ce qui ressemble à <code>/manga/</code> ou <code>/chapter/</code>. Pour la classe CSS : clic droit sur le texte du chapitre › Inspecter, repère <code>class="…"</code>.</p></details>
 <div class="row"><div><label>Nom affiché dans Sefirah</label><input id="f_name"></div><div><label>Langue (fr, en, es…)</label><input id="f_lang" value="fr"></div><div><label>Version <span class="hint" style="display:inline">(0.1.0 pour une 1re version)</span></label><input id="f_ver" value="0.1.0"></div></div>
-<label>Adresse d'une recherche</label><small class="hint">Fais une recherche sur le site, copie l'adresse, puis remplace le mot cherché par <code>{q}</code> (et le numéro de page par <code>{page}</code>).</small><input id="f_search" placeholder="https://exemple.com/search?q={q}&page={page}">
-<div class="row"><div><label>Les liens vers une œuvre contiennent</label><small class="hint">Ex. <code>/novel/</code> ou <code>/manga/</code></small><input id="f_list" placeholder="/manga/"></div><div><label>Les liens vers un chapitre contiennent</label><small class="hint">Ex. <code>/chapter/</code> ou <code>/chapitre-</code></small><input id="f_chap" placeholder="/chapter/"></div></div>
-<div class="row"><div><label>Classe CSS du texte du chapitre (romans)</label><small class="hint">Ex. <code>chapter-content</code></small><input id="f_cont" placeholder="chapter-content"></div><div><label>Classe CSS des images (mangas)</label><small class="hint">Laisse vide pour prendre toutes les images.</small><input id="f_img" placeholder="page-img"></div><div><label>Ordre des chapitres</label><small class="hint">Si le site liste le plus récent en premier, choisis « Inverser ».</small><select id="f_rev"><option value="0">Tel quel</option><option value="1">Inverser</option></select></div></div>
+<label>Adresse d'une recherche <span class="hint" style="display:inline">(facultatif)</span></label><small class="hint">Fais une recherche sur le site, copie l'adresse, puis remplace le mot cherché par <code>{q}</code> (et le numéro de page par <code>{page}</code>). <b>Pas de page de recherche à adresse fixe ? Laisse vide</b> : Sefirah cherchera alors le titre parmi les œuvres de la page d'accueil du site.</small><input id="f_search" placeholder="https://exemple.com/search?q={q}&page={page}">
+<div id="blk_novel"><h3 style="margin:16px 0 2px">📖 Webnovel / light novel</h3>
+<div class="row"><div><label>Les liens vers une œuvre contiennent</label><small class="hint">Ex. <code>/novel/</code> ou <code>/series/</code></small><input id="f_list" placeholder="/novel/"></div><div><label>Les liens vers un chapitre contiennent</label><small class="hint">Ex. <code>/chapter/</code> ou <code>/chapitre-</code></small><input id="f_chap" placeholder="/chapter/"></div></div>
+<div class="row"><div><label>Classe CSS du texte du chapitre</label><small class="hint">Ex. <code>chapter-content</code></small><input id="f_cont" placeholder="chapter-content"></div><div><label>Ordre des chapitres</label><small class="hint">Si le site liste le plus récent en premier, choisis « Inverser ».</small><select id="f_rev"><option value="0">Tel quel</option><option value="1">Inverser</option></select></div></div></div>
+<div id="blk_manga" style="display:none"><h3 style="margin:16px 0 2px">🖼️ Manga / manhwa / webtoon</h3>
+<div class="row"><div><label>Les liens vers une œuvre contiennent</label><small class="hint">Ex. <code>/manga/</code></small><input id="f_list_m" placeholder="/manga/"></div><div><label>Les liens vers un chapitre contiennent</label><small class="hint">Ex. <code>/chapter/</code></small><input id="f_chap_m" placeholder="/chapter/"></div></div>
+<div class="row"><div><label>Classe CSS des images</label><small class="hint">Laisse vide pour prendre toutes les images.</small><input id="f_img" placeholder="page-img"></div><div><label>Ordre des chapitres</label><small class="hint">Si le site liste le plus récent en premier, choisis « Inverser ».</small><select id="f_rev_m"><option value="0">Tel quel</option><option value="1">Inverser</option></select></div></div></div>
 <h2 class="st"><span>3</span>Générer</h2><div class="row"><button class="b" id="cg2">Générer le Lua</button><button class="b s" id="ct2">Envoyer au testeur</button></div></div>
 <div id="cout"></div></section>
 
@@ -95,7 +101,7 @@ function viewCode(t,c){$('#dt').textContent=t;$('#dc').textContent=c;dlg.showMod
 $('#px').value=LS.get('px','');$('#pxs').onclick=()=>{LS.set('px',$('#px').value.trim());alert('Enregistré')};
 async function getPage(url){const px=LS.get('px','');let err;
  try{const r=await fetch(url);return {status:r.status,text:await r.text()}}catch(e){err=e}
- if(!px)throw new Error("Accès bloqué par le navigateur (CORS). Solution : déployer proxy/worker.js (gratuit) et l'enregistrer dans l'onglet Tester.");
+ if(!px)throw new Error("Ce site refuse d'être lu depuis une autre page web (protection CORS du navigateur). Ce n'est pas une panne de ton site : remplis les champs à la main, ou déploie proxy/worker.js (gratuit) puis enregistre-le dans l'onglet Tester.");
  const r=await fetch(px+'?url='+encodeURIComponent(url));return {status:r.status,text:await r.text()}}
 const blocked=p=>(p.status==403||p.status==503||p.status==429)&&/cloudflare|just a moment|captcha|attention required/i.test(p.text);
 const dom=h=>new DOMParser().parseFromString(h,'text/html');
@@ -143,11 +149,19 @@ $('#ca').onclick=async()=>{const u=$('#cu').value.trim();const o=$('#cmsg');o.in
   const top=Object.entries(seg).sort((a,b)=>b[1]-a[1]).slice(0,4);
   $('#f_name').value=$('#f_name').value||(d.querySelector('meta[property="og:site_name"]')?.content||d.title||'').slice(0,40);
   const f=d.querySelector('form[action*=search],form[role=search]');if(f){const i=f.querySelector('input[name]');if(i)$('#f_search').value=new URL(f.getAttribute('action')||'/',base).href+'?'+i.name+'={q}'}
-  if(top[0])$('#f_list').value=top[0][0];
+  if(top[0]){$('#f_list').value=top[0][0];$('#f_list_m').value=top[0][0]}
   o.innerHTML=`<p class="ok">✔ Page lue (${p.text.length} car.). Préfixes de liens fréquents : ${top.map(t=>`<code>${H(t[0])}</code>×${t[1]}`).join(', ')||'aucun'}.</p><p class="w">Suggestions pré-remplies : vérifie-les, puis complète le préfixe chapitre et la classe du contenu (ouvre un chapitre dans ton navigateur › inspecter).</p>`;
- }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p><p>Mode manuel : remplis les champs ci-dessous.</p>`}};
-const cfg=()=>({base:(()=>{try{return new URL($('#cu').value).origin}catch{return ''}})(),name:$('#f_name').value||'MaSource',lang:$('#f_lang').value||'multi',ver:$('#f_ver').value||'0.1.0',type:$('#cty').value,search:$('#f_search').value,list:$('#f_list').value,chap:$('#f_chap').value,cont:$('#f_cont').value,img:$('#f_img').value,rev:$('#f_rev').value=='1'});
-const lp=s=>s.replace(/[^%w]/g,m=>'%'+m),ls=s=>String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+ }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p><p>👉 Pas de panique : l'analyse automatique sert seulement à pré-remplir les champs. Continue en <b>mode manuel</b> : remplis l'étape 2 ci-dessous.</p>`}};
+const tyN=$('#ty_novel'),tyM=$('#ty_manga');
+function syncTy(){$('#blk_novel').style.display=tyN.checked?'':'none';$('#blk_manga').style.display=tyM.checked?'':'none'}
+tyN.onchange=tyM.onchange=syncTy;syncTy();
+const cfgBase=()=>({base:(()=>{try{return new URL($('#cu').value).origin}catch{return ''}})(),name:$('#f_name').value||'MaSource',lang:$('#f_lang').value||'multi',ver:$('#f_ver').value||'0.1.0',search:$('#f_search').value.trim()});
+const cfgAll=()=>{const b=cfgBase(),both=tyN.checked&&tyM.checked,L=[];
+ if(tyN.checked)L.push({...b,type:'novel',tag:'Novel',list:$('#f_list').value.trim(),chap:$('#f_chap').value.trim(),cont:$('#f_cont').value.trim(),img:'',rev:$('#f_rev').value=='1'});
+ if(tyM.checked)L.push({...b,type:'manga',tag:'Manga',name:both?b.name+' (manga)':b.name,list:$('#f_list_m').value.trim(),chap:$('#f_chap_m').value.trim(),cont:'',img:$('#f_img').value.trim(),rev:$('#f_rev_m').value=='1'});
+ return L};
+const cfg=()=>cfgAll()[0]||{...cfgBase(),type:'novel',tag:'Novel',list:'',chap:'',cont:'',img:'',rev:false};
+const lp=s=>s.replace(/[^A-Za-z0-9]/g,m=>'%'+m),ls=s=>String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
 function genLua(c){const id=c.name.toLowerCase().replace(/[^a-z0-9]/g,'')||'source',man=c.type=='manga';
 return {id,code:`-- ${c.name} — source générée par Sefirah Source Hub (modèle sans IA). À relire et tester.
 -- Contrat : voir extensions/mangapill.lua du plugin Sefirah.
@@ -200,11 +214,20 @@ end
 function ext:searchNovels(term, page)
     term = tostring(term or ""):match("^%s*(.-)%s*$")
     if term == "" then return ext:popularNovels(page) end
-    local url = SEARCH:gsub("{q}", function() return enc(term) end):gsub("{page}", function() return tostring(page or 1) end)
+${c.search?`    local url = SEARCH:gsub("{q}", function() return enc(term) end):gsub("{page}", function() return tostring(page or 1) end)
     local html, err = get(url)
     if not html then return { novels = {}, error = "Recherche impossible (" .. tostring(err) .. ")" } end
     return { novels = parse_list(html) }
-end
+`:`    -- Pas d'adresse de recherche configurée : on filtre par nom les œuvres visibles sur la page d'accueil.
+    if (page or 1) > 1 then return { novels = {} } end
+    local html, err = get(BASE .. "/")
+    if not html then return { novels = {}, error = "Site injoignable (" .. tostring(err) .. ")" } end
+    local out, q = {}, term:lower()
+    for _, n in ipairs(parse_list(html)) do
+        if n.name:lower():find(q, 1, true) then out[#out+1] = n end
+    end
+    return { novels = out }
+`}end
 
 local function meta(html, path)
     local t = html:match("<h1[^>]*>(.-)</h1>")
@@ -260,11 +283,15 @@ end
 `}
 return ext
 `,meta:`{ id = "${id}", name = "${ls(c.name)}", site = "${ls(c.base)}", lang = "${ls(c.lang)}", version = "${ls(c.ver)}", runtime = "lua"${man?', type = "manga"':''} },`}}
-$('#cg2').onclick=()=>{const c=cfg(),miss=[];if(!c.base)miss.push("URL du site");if(!c.search)miss.push("URL de recherche");if(!c.list)miss.push("préfixe œuvre");if(!c.chap)miss.push("préfixe chapitre");if(c.type=='novel'&&!c.cont)miss.push("classe du texte");
+$('#cg2').onclick=()=>{const L=cfgAll(),miss=[];
+ if(!L.length)return $('#cout').innerHTML='<p class="e">Coche au moins un type de contenu (novel ou manga).</p>';
+ if(!L[0].base)miss.push("URL du site");
+ L.forEach(c=>{const p=L.length>1?c.tag+' : ':'';if(!c.list)miss.push(p+"préfixe œuvre");if(!c.chap)miss.push(p+"préfixe chapitre");if(c.type=='novel'&&!c.cont)miss.push(p+"classe du texte")});
  if(miss.length)return $('#cout').innerHTML=`<p class="e">Champs manquants : ${miss.join(', ')}</p>`;
- const g=genLua(c);saveMine(g.id+'.lua',g.code);window._g=g;
- $('#cout').innerHTML=`<div class="card"><p class="ok">✔ Fichier généré et ajouté à « Mes sources ».</p><div class="row"><button class="b" onclick="dl('${g.id}.lua',_g.code)">Télécharger ${g.id}.lua</button></div>
- <h2 class="st"><span>4</span>Tester et installer</h2><ul class="todo"><li><label style="margin:0;color:inherit"><input type="checkbox">Clique « Envoyer au testeur » plus haut, puis « Lancer » (vérifie que le site répond et que les chapitres sont trouvés).</label></li><li><label style="margin:0;color:inherit"><input type="checkbox">Télécharge <code>${g.id}.lua</code> et copie-le dans <code>koreader/plugins/sefirah.koplugin/extensions/</code>.</label></li><li><label style="margin:0;color:inherit"><input type="checkbox">Ajoute cette ligne dans <code>core/extmgr.lua</code>, dans la table <code>metas</code> : <button class="b s" onclick="cp(_g.meta,this)">Copier la ligne</button></label><pre>${H(g.meta)}</pre></li><li><label style="margin:0;color:inherit"><input type="checkbox">Redémarre KOReader › Sefirah › Sources › installe la source.</label></li></ul><p class="w">À faire à la main : vérifier les sélecteurs sur le vrai site, nom/genre/auteur de la fiche, filtres de « Parcourir » (non générés). Le code n'est pas testé tant que tu ne l'as pas essayé dans KOReader.</p><pre>${H(g.code)}</pre></div>`};
+ const G=L.map(c=>genLua(c)),n=G.length;G.forEach(g=>saveMine(g.id+'.lua',g.code));window._gs=G;
+ $('#cout').innerHTML=`<div class="card"><p class="ok">✔ ${n>1?n+' fichiers générés et ajoutés':'Fichier généré et ajouté'} à « Mes sources ».</p>${n>1?`<p class="w">Un site avec romans <b>et</b> mangas donne deux sources (une par type), car un fichier Lua ne déclare qu'un seul type. Installe les deux.</p>`:''}
+ <div class="row">${G.map((g,i)=>`<button class="b" onclick="dl('${g.id}.lua',_gs[${i}].code)">Télécharger ${g.id}.lua</button>`).join('')}</div>
+ <h2 class="st"><span>4</span>Tester et installer</h2><ul class="todo"><li><label style="margin:0;color:inherit"><input type="checkbox">Clique « Envoyer au testeur » plus haut, puis « Lancer » (vérifie que le site répond et que les chapitres sont trouvés).${n>1?' Le testeur ne prend qu\'un type à la fois : relance-le pour l\'autre en changeant le type dans l\'onglet Tester.':''}</label></li><li><label style="margin:0;color:inherit"><input type="checkbox">Télécharge ${G.map(g=>`<code>${g.id}.lua`+'</code>').join(' et ')} et copie-${n>1?'les':'le'} dans <code>koreader/plugins/sefirah.koplugin/extensions/</code>.</label></li><li><label style="margin:0;color:inherit"><input type="checkbox">Ajoute ${n>1?'ces lignes':'cette ligne'} dans <code>core/extmgr.lua</code>, dans la table <code>metas</code> : ${G.map((g,i)=>`<button class="b s" onclick="cp(_gs[${i}].meta,this)">Copier la ligne${n>1?' '+(i+1):''}</button>`).join(' ')}</label><pre>${H(G.map(g=>g.meta).join('\n'))}</pre></li><li><label style="margin:0;color:inherit"><input type="checkbox">Redémarre KOReader › Sefirah › Sources › installe la source.</label></li></ul><p class="w">À faire à la main : vérifier les sélecteurs sur le vrai site, nom/genre/auteur de la fiche, filtres de « Parcourir » (non générés). Le code n'est pas testé tant que tu ne l'as pas essayé dans KOReader.</p>${G.map(g=>`<pre>${H(g.code)}</pre>`).join('')}</div>`};
 $('#ct2').onclick=()=>{const c=cfg();$('#t_base').value=c.base;$('#t_search').value=c.search;$('#t_list').value=c.list;$('#t_chap').value=c.chap;$('#t_cont').value=c.cont;$('#t_img').value=c.img;$('#t_type').value=c.type;show('tester')};
 // ---------- convertir
 function fillSel(){const s=$('#vs');s.innerHTML='<option value="">— choisir une source importée —</option>'+Object.keys(mine()).map(k=>`<option>${H(k)}</option>`).join('')}fillSel();
