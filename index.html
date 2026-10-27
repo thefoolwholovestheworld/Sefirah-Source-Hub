@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sefirah Source Hub</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%235b3fd0'/%3E%3Ctext x='32' y='46' font-size='40' font-family='Arial,sans-serif' font-weight='700' text-anchor='middle' fill='white'%3ES%3C/text%3E%3C/svg%3E">
 <style>
 :root{--bg:#f6f5f2;--c:#fff;--t:#1d1d1f;--m:#666;--a:#5b3fd0;--b:#ddd;--ok:#1a7f37;--w:#b26a00;--e:#c62828}
 @media(prefers-color-scheme:dark){:root{--bg:#141417;--c:#1e1e23;--t:#eee;--m:#9a9aa3;--a:#9b86ff;--b:#33333a;--ok:#4cc26a;--w:#f0a63c;--e:#ff6b6b}}
@@ -18,6 +19,8 @@ label{display:block;font-size:13px;color:var(--m);margin-top:8px}.tag{display:in
 .ok{color:var(--ok)}.w{color:var(--w)}.e{color:var(--e)}pre{background:var(--bg);padding:10px;border-radius:8px;overflow:auto;max-height:55vh;font-size:12px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px}.sp{display:inline-block;width:14px;height:14px;border:2px solid var(--b);border-top-color:var(--a);border-radius:50%;animation:r 1s linear infinite;vertical-align:middle}@keyframes r{to{transform:rotate(360deg)}}
 dialog{width:min(900px,95vw);background:var(--c);color:var(--t);border:1px solid var(--b);border-radius:10px}small{color:var(--m)}
+.ico{width:20px;height:20px;border-radius:4px;vertical-align:middle;margin-right:6px;background:var(--b);object-fit:contain}
+.sh{display:flex;align-items:center;gap:10px;margin:0 0 8px}.sh .ico{margin:0}
 
 .steps{display:flex;gap:6px;flex-wrap:wrap;margin:4px 0 12px}.steps span{flex:1 1 120px;font-size:13px;padding:6px 10px;border-radius:8px;border:1px solid var(--b);color:var(--m);background:var(--c)}.steps span b{color:var(--a)}
 .hero{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px}.hero .card{margin:0}.hero .n{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--a);color:#fff;font-weight:700;margin-right:6px}
@@ -63,14 +66,19 @@ async function getPage(url){const px=LS.get('px','');let err;
  const r=await fetch(px+'?url='+encodeURIComponent(url));return {status:r.status,text:await r.text()}}
 const blocked=p=>(p.status==403||p.status==503||p.status==429)&&/cloudflare|just a moment|captcha|attention required/i.test(p.text);
 const dom=h=>new DOMParser().parseFromString(h,'text/html');
+// ---------- icônes des sites (favicon) : service de favicons, puis /favicon.ico du site, sinon masquée
+const ico=(site,n=20)=>{let o='';try{o=new URL(site).origin}catch{}
+ if(!o)return '';
+ return `<img class="ico" width="${n}" height="${n}" alt="" loading="lazy" referrerpolicy="no-referrer" src="https://www.google.com/s2/favicons?sz=64&amp;domain_url=${encodeURIComponent(o)}" data-fb="${H(o+'/favicon.ico')}">`};
+const hookIco=r=>r.querySelectorAll('img.ico').forEach(i=>i.addEventListener('error',()=>{const f=i.dataset.fb;if(!i.dataset.t&&f){i.dataset.t=1;i.src=f}else i.style.visibility='hidden'}));
 // ---------- catalogue
 let SRC=[];
 fetch('sources/manifest.json').then(r=>r.json()).then(j=>{SRC=j.sources;[...new Set(SRC.map(s=>s.lang))].sort().forEach(l=>$('#cl').append(new Option(l,l)));cat()}).catch(()=>$('#cn').textContent='Manifeste introuvable (ouvre le site via GitHub Pages ou un serveur local).');
 function cat(){const q=$('#cq').value.toLowerCase(),l=$('#cl').value,t=$('#ct').value,s=$('#cs').value;
  const L=SRC.filter(x=>(!q||x.name.toLowerCase().includes(q))&&(!l||x.lang==l)&&(!t||x.type==t)&&(!s||x.status==s));
  $('#cn').textContent=L.length+' source(s)';
- $('#cg').innerHTML=L.map(x=>`<div class="card"><b>${H(x.name)}</b> <small>v${H(x.version)}</small><br><span class="tag">${H(x.lang)}</span><span class="tag">${H(x.type)}</span><span class="tag">${H(x.license)}</span><span class="tag ${x.status=='testé'?'ok':'w'}">${H(x.status)}</span><br><small><a href="${H(x.site)}" target="_blank" rel="noopener">${H(x.site)}</a><br>Dernière vérif. : ${x.lastCheck||'jamais'}</small>
- <div class="row"><button class="b s" data-a="v" data-i="${x.id}">Code</button><button class="b s" data-a="d" data-i="${x.id}">Télécharger</button><button class="b s" data-a="c" data-i="${x.id}">Copier le lien</button></div></div>`).join('')}
+ $('#cg').innerHTML=L.map(x=>`<div class="card">${ico(x.site)}<b>${H(x.name)}</b> <small>v${H(x.version)}</small><br><span class="tag">${H(x.lang)}</span><span class="tag">${H(x.type)}</span><span class="tag">${H(x.license)}</span><span class="tag ${x.status=='testé'?'ok':'w'}">${H(x.status)}</span><br><small><a href="${H(x.site)}" target="_blank" rel="noopener">${H(x.site)}</a><br>Dernière vérif. : ${x.lastCheck||'jamais'}</small>
+ <div class="row"><button class="b s" data-a="v" data-i="${x.id}">Code</button><button class="b s" data-a="d" data-i="${x.id}">Télécharger</button><button class="b s" data-a="c" data-i="${x.id}">Copier le lien</button></div></div>`).join('');hookIco($('#cg'))}
 ['cq','cl','ct','cs'].forEach(i=>$('#'+i).oninput=cat);
 $('#cg').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const x=SRC.find(s=>s.id==b.dataset.i);
  if(b.dataset.a=='c'){const u=new URL(x.file,location.href).href;try{await navigator.clipboard.writeText(u);b.textContent='Copié ✔'}catch{prompt('Lien :',u)}return}
@@ -758,7 +766,7 @@ function renderResult(tests,info,openAdv){
   :'✔ Fichier généré : tous les tests bloquants sont passés.';
  const why=info.ai?'Réglages établis par l\'IA.':'Réglages devinés sans IA (heuristiques)'+(info.aiWhy?' — '+H(info.aiWhy):'')+'.';
  const inp=(id,l,v,ph)=>`<label>${l}</label><input id="${id}" value="${H(v)}" placeholder="${H(ph||'')}">`;
- $('#cout').innerHTML=`<div class="card"><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
+ $('#cout').innerHTML=`<div class="card"><div class="sh">${ico(c.base,32)}<div><b>${H(c.name)}</b><br><small>${H(c.base.replace(/^https?:\/\//,''))}</small></div></div><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
  ${miss.map(m=>`<span class="fx">🛠 Pour trouver ${H(MISS[m][0])} : ${H(MISS[m][1])}</span>`).join('')}
  <small>${why}</small>${info.aiWhy?fx(info.aiWhy):''}
  <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
@@ -780,6 +788,7 @@ function renderResult(tests,info,openAdv){
   <li>Ajoute cette ligne dans la table <code>metas</code> de <code>core/extmgr.lua</code> : <button class="b s" id="mtb">Copier la ligne</button><pre>${H(g.meta)}</pre></li>
   <li>Redémarre KOReader › Sefirah › Sources › installe la source.</li></ol>
  <p class="w" style="margin-bottom:0"><small>Le code n'est pas testé dans KOReader : essaie-le sur ta liseuse et vérifie la licence / les conditions d'utilisation du site.</small></p></div>`;
+ hookIco($('#cout'));
  $('#dlb').onclick=()=>dl(g.id+'.lua',g.code);
  $('#cpb').onclick=e=>cp(g.code,e.target);
  $('#vwb').onclick=()=>viewCode(g.id+'.lua',g.code);
