@@ -46,9 +46,6 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 
 </main>
 <dialog id="dlg"><div class="row"><b id="dt"></b><button class="b s" onclick="dlg.close()">Fermer</button></div><pre id="dc"></pre></dialog>
-<dialog id="sdlg"><div class="row"><b>📡 Envoyer à la liseuse</b><button class="b s" onclick="sdlg.close()">Fermer</button></div>
-<p>Sur la liseuse : ouvre « Recevoir une source » et tape ici le code à 4 chiffres affiché.</p>
-<div class="row"><input id="scode" inputmode="numeric" maxlength="4" placeholder="0000" autocomplete="off"><button class="b" id="sgo">Envoyer</button></div><div id="smsg"></div></dialog>
 <script>
 const $=s=>document.querySelector(s),H=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -78,11 +75,10 @@ function cat(){const q=$('#cq').value.toLowerCase(),l=$('#cl').value,t=$('#ct').
  const L=SRC.filter(x=>(!q||x.name.toLowerCase().includes(q))&&(!l||x.lang==l)&&(!t||x.type==t)&&(!s||x.status==s));
  $('#cn').textContent=L.length+' source(s)';
  $('#cg').innerHTML=L.map(x=>`<div class="card">${ico(x.site)}<b>${H(x.name)}</b> <small>v${H(x.version)}</small><br><span class="tag">${H(x.lang)}</span><span class="tag">${H(x.type)}</span><span class="tag">${H(x.license)}</span><span class="tag ${x.status=='testé'?'ok':'w'}">${H(x.status)}</span><br><small><a href="${H(x.site)}" target="_blank" rel="noopener">${H(x.site)}</a><br>Dernière vérif. : ${x.lastCheck||'jamais'}</small>
- <div class="row"><button class="b s" data-a="v" data-i="${x.id}">Code</button><button class="b s" data-a="d" data-i="${x.id}">Télécharger</button><button class="b s" data-a="s" data-i="${x.id}">📡 Envoyer</button><button class="b s" data-a="c" data-i="${x.id}">Copier le lien</button></div></div>`).join('');hookIco($('#cg'))}
+ <div class="row"><button class="b s" data-a="v" data-i="${x.id}">Code</button><button class="b s" data-a="d" data-i="${x.id}">Télécharger</button><button class="b s" data-a="c" data-i="${x.id}">Copier le lien</button></div></div>`).join('');hookIco($('#cg'))}
 ['cq','cl','ct','cs'].forEach(i=>$('#'+i).oninput=cat);
 $('#cg').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const x=SRC.find(s=>s.id==b.dataset.i);
  if(b.dataset.a=='c'){const u=new URL(x.file,location.href).href;try{await navigator.clipboard.writeText(u);b.textContent='Copié ✔'}catch{prompt('Lien :',u)}return}
- if(b.dataset.a=='s'){sendDlg(x.id,await (await fetch(x.file)).text());return}
  const t=await (await fetch(x.file)).text();b.dataset.a=='v'?viewCode(x.id+'.lua',t):dl(x.id+'.lua',t)};
 // ---------- créer : une adresse -> IA -> .lua
 const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:''});
@@ -770,7 +766,8 @@ function renderResult(tests,info,openAdv){
  $('#cout').innerHTML=`<div class="card"><div class="sh">${ico(c.base,32)}<div><b>${H(c.name)}</b><br><small>${H(c.base.replace(/^https?:\/\//,''))}</small></div><button class="b s" id="icb" style="margin-left:auto">⬇ Icône</button></div><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
  ${miss.map(m=>`<span class="fx">🛠 Pour trouver ${H(MISS[m][0])} : ${H(MISS[m][1])}</span>`).join('')}
  <small>${why}</small>${info.aiWhy?fx(info.aiWhy):''}
- <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b s" id="snb">📡 Envoyer à la liseuse</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
+ <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
+ <div id="rcv"></div>
  <details class="help" open><summary>Détail des tests (${tests.length})</summary><ul>${tests.map(r=>`<li class="${r[0]}">${ic[r[0]]} ${H(r[1])}${r[0]=='ok'?'':fx(r[1],r[0]=='e')}</li>`).join('')}</ul></details>
  <details class="help" ${openAdv||miss.length?'open':''}><summary>Réglages détectés (avancé)</summary>
   <div class="row"><div>${inp('a_name','Nom affiché',c.name)}</div><div>${inp('a_lang','Langue',c.lang)}</div><div><label>Type</label><select id="a_type"><option value="novel" ${c.type=='novel'?'selected':''}>Roman</option><option value="manga" ${c.type=='manga'?'selected':''}>Manga</option></select></div></div>
@@ -796,7 +793,7 @@ function renderResult(tests,info,openAdv){
    a.href=URL.createObjectURL(bl);a.download=g.id+'-icon.'+ext;a.click();b.textContent='Icône téléchargée ✔';return}catch{}}
   window.open(urls[0],'_blank');b.textContent='Image ouverte : enregistre-la'};
  $('#dlb').onclick=()=>dl(g.id+'.lua',g.code);
- $('#snb').onclick=()=>sendDlg(g.id,g.code);
+ if(k=='ok')relayPublish(g.id,g.code,$('#rcv'));
  $('#cpb').onclick=e=>cp(g.code,e.target);
  $('#vwb').onclick=()=>viewCode(g.id+'.lua',g.code);
  $('#mtb').onclick=e=>cp(g.meta,e.target);
@@ -839,17 +836,13 @@ async function generate(){
   o.innerHTML='';renderResult(t,{ai,aiWhy});
  }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p>${fx(e.message,true)}`}
  finally{btn.disabled=false}}
-// ---------- envoyer à la liseuse (code à 4 chiffres affiché par la liseuse)
-let SEND=null;
-function sendDlg(id,code){SEND={id,code};$('#smsg').innerHTML='';$('#scode').value='';sdlg.showModal()}
-$('#sgo').onclick=async()=>{const b=$('#sgo'),m=$('#smsg'),code=$('#scode').value.trim();
- if(!/^\d{4}$/.test(code)){m.innerHTML='<span class="e">Le code doit faire 4 chiffres.</span>';return}
- b.disabled=true;m.innerHTML='<span class="sp"></span> Envoi…';
- try{const r=await fetch(PXB()+'/relay/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code,id:SEND.id,lua:SEND.code})});
+// ---------- recevoir une source sur la liseuse : le site crée un code à 4 chiffres
+async function relayPublish(id,code,box){
+ box.innerHTML='<span class="sp"></span> Préparation du code pour la liseuse…';
+ try{const r=await fetch(PROXY+'/relay/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,lua:code})});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Erreur '+r.status);
-  m.innerHTML='<span class="ok">✔ Envoyé. La liseuse le reçoit sous une minute.</span>'}
- catch(e){m.innerHTML='<span class="e">✘ '+H(e.message)+'</span>'}
- finally{b.disabled=false}};
+  box.innerHTML=`<div class="card" style="text-align:center"><div>📡 Code pour la liseuse</div><div style="font-size:42px;font-weight:700;letter-spacing:.2em;color:var(--a)">${H(j.code)}</div><small>Sur la liseuse : Sefirah › Sources › icône antenne, puis tape ce code.<br>Valable 10 minutes, utilisable une seule fois.</small></div>`}
+ catch(e){box.innerHTML='<p class="w">⚠ Code pour la liseuse indisponible ('+H(e.message)+'). Tu peux quand même télécharger le fichier.</p>'}}
 $('#cai').onclick=generate;
 $('#cu').addEventListener('keydown',e=>{if(e.key=='Enter')generate()});
 show(TABS.some(t=>t[0]==location.hash.slice(1))?location.hash.slice(1):'creer');
