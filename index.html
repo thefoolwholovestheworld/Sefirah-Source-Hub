@@ -76,7 +76,7 @@ $('#cg').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const
  if(b.dataset.a=='c'){const u=new URL(x.file,location.href).href;try{await navigator.clipboard.writeText(u);b.textContent='Copié ✔'}catch{prompt('Lien :',u)}return}
  const t=await (await fetch(x.file)).text();b.dataset.a=='v'?viewCode(x.id+'.lua',t):dl(x.id+'.lua',t)};
 // ---------- créer : une adresse -> IA -> .lua
-const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false});
+const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:''});
 let CFG=NEWCFG();
 const cfg=()=>({...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base:(()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}})()});
 function applyCfg(o){
@@ -92,7 +92,227 @@ function applyCfg(o){
 const ls=s=>String(s).replace(/\\/g,'\\\\').replace(/"/g,'\\"');
 // NB : le Lua généré n'utilise JAMAIS d'antislash (le gabarit ci-dessous est un template literal JS) ;
 // pour un saut de ligne il utilise string.char(10).
-function genLua(c){const id=c.name.toLowerCase().replace(/[^a-z0-9]/g,'')||'source',man=c.type=='manga';
+// ---------- mode Next.js : bloc Lua ajouté au .lua (aucun antislash : string.char(92) / string.char(34))
+function nextLua(c){return `
+-- ===== MODE NEXT.JS : lecture du JSON embarqué dans la page (self.__next_f.push) =====
+local NK_NOVEL   = "${ls(c.nkNovel||'')}"
+local NK_CHAP    = "${ls(c.nkChap||'')}"
+local NK_PARA    = "${ls(c.nkPara||'')}"
+local NK_TEXT    = "${ls(c.nkText||'')}"
+local NK_CONTENT = "${ls(c.nkContent||'')}"
+local NK_LIST    = "${ls(c.nkList||'')}"
+local API_CHAP   = "${ls(c.apiChap||'')}"
+local API_SEARCH = "${ls(c.apiSearch||'')}"
+local BS, QT = string.char(92), string.char(34)
+
+local function unescape_js(s)
+    return (s:gsub(BS .. "(.)", function(x)
+        if x == "n" then return NL end
+        if x == "t" then return string.char(9) end
+        if x == "r" then return "" end
+        if x == QT or x == BS or x == "/" then return x end
+        return BS .. x
+    end))
+end
+-- concatène tous les self.__next_f.push([1,"..."]) de la page
+local function rsc_stream(html)
+    local out, pos, marker = {}, 1, ".push([1," .. QT
+    while true do
+        local a = html:find(marker, pos, true)
+        if not a then break end
+        local i = a + #marker
+        local j = i
+        while true do
+            local q = html:find(QT, j, true)
+            if not q then j = #html + 1; break end
+            local bs, k = 0, q - 1
+            while k >= i and html:sub(k, k) == BS do bs = bs + 1; k = k - 1 end
+            if bs % 2 == 0 then j = q; break end
+            j = q + 1
+        end
+        out[#out + 1] = unescape_js(html:sub(i, j - 1))
+        pos = j + 1
+    end
+    return table.concat(out)
+end
+-- lignes texte externalisées « id:T<longueur hex>,<texte> » ; une valeur "$id" y renvoie
+local function rsc_rows(stream)
+    local rows, pos = {}, 1
+    while pos <= #stream do
+        local s, e, id, hx = stream:find("(%w+):T(%x+),", pos)
+        if not s then break end
+        local len = tonumber(hx, 16)
+        if not len or e + len > #stream then break end
+        rows[id] = stream:sub(e + 1, e + len)
+        pos = e + len + 1
+    end
+    return rows
+end
+local function resolve(s, rows)
+    for _ = 1, 8 do
+        if type(s) ~= "string" then return s end
+        local id = s:match("^%$(%w+)$")
+        if not (id and rows[id]) then break end
+        s = rows[id]
+    end
+    return s
+end
+-- objet JSON équilibré après "<key>":
+local function find_obj(text, key)
+    if not key or key == "" then return nil end
+    local s, e = text:find(QT .. key .. QT .. ":{", 1, true)
+    if not s then return nil end
+    local depth, in_str, esc = 0, false, false
+    for i = e, #text do
+        local ch = text:sub(i, i)
+        if in_str then
+            if esc then esc = false
+            elseif ch == BS then esc = true
+            elseif ch == QT then in_str = false end
+        elseif ch == QT then in_str = true
+        elseif ch == "{" then depth = depth + 1
+        elseif ch == "}" then
+            depth = depth - 1
+            if depth == 0 then return text:sub(e, i) end
+        end
+    end
+    return nil
+end
+local function jdecode(str)
+    local ok_j, J = pcall(require, "rapidjson")
+    if not ok_j then J = require("json") end
+    local ok, d = pcall(J.decode, str)
+    if ok then return d end
+    return nil
+end
+local function pick(o, names)
+    for _, n in ipairs(names) do
+        local v = o[n]
+        if type(v) == "string" and v ~= "" then return v end
+    end
+    return nil
+end
+local function esc_html(s) return (tostring(s or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")) end
+
+local function next_novel(path)
+    local html, err = get(path)
+    if not html then return nil, err end
+    local st = rsc_stream(html)
+    local raw = find_obj(st, NK_NOVEL)
+    return raw and jdecode(raw), st
+end
+local function novel_meta(n, st, path)
+    local desc = resolve(n.description or n.synopsis, rsc_rows(st))
+    return { name = dec(type(n.title) == "string" and n.title or path), path = path,
+        cover = abs(pick(n, { "coverImage", "cover", "coverUrl", "image", "thumbnail" })),
+        summary = type(desc) == "string" and para(desc) or "",
+        author = pick(n, { "author" }) or "", status = pick(n, { "status" }) or "", genres = {},
+        total_chapters = (type(n._count) == "table" and tonumber(n._count.chapters)) or 0 }
+end
+local function map_chapters(list, base_path)
+    local ch = {}
+    if type(list) ~= "table" then return ch end
+    for _, c in ipairs(list) do
+        if type(c) == "table" and type(c.slug) == "string" then
+            ch[#ch + 1] = { name = dec(tostring(c.title or c.name or ("Chapitre " .. (#ch + 1)))),
+                path = base_path .. "/" .. c.slug, chapter_number = c.chapterNumber or c.number, locked = c.isPremium or nil }
+        end
+    end
+    return ch
+end
+-- l'interface attend la liste du plus récent au plus ancien
+local function newest_first(ch, asc_hint)
+    local a = ch[1] and tonumber(ch[1].chapter_number)
+    local b = ch[#ch] and tonumber(ch[#ch].chapter_number)
+    local asc = asc_hint
+    if a and b and a ~= b then asc = a < b end
+    if asc then for i = 1, math.floor(#ch / 2) do ch[i], ch[#ch + 1 - i] = ch[#ch + 1 - i], ch[i] end end
+    return ch
+end
+local function api_chapters(slug)
+    local all, skip = {}, 0
+    for _ = 1, 200 do
+        local url = API_CHAP:gsub("{slug}", function() return slug end):gsub("{skip}", function() return tostring(skip) end)
+        local body = get(url)
+        local data = body and jdecode(body)
+        if type(data) ~= "table" then return nil end
+        local page = data.chapters or data.data or data.items or (data[1] and data) or {}
+        for _, c in ipairs(page) do all[#all + 1] = c end
+        local total = tonumber(data.total)
+        if #page == 0 or not API_CHAP:find("{skip}", 1, true) or not (data.hasMore or (total and #all < total)) then break end
+        skip = #all
+    end
+    return all
+end
+
+function ext:parseNovelMeta(path)
+    local n, st = next_novel(path)
+    if not n then return nil end
+    return novel_meta(n, st, path)
+end
+
+function ext:parseNovel(path)
+    local base_path = path:gsub("/+$", "")
+    local n, st = next_novel(path)
+    if not n then return nil end
+    local m, list = novel_meta(n, st, path), nil
+    if API_CHAP ~= "" then list = api_chapters(base_path:match("([^/]+)$") or "")
+    elseif NK_LIST ~= "" then list = n[NK_LIST] end
+    m.chapters = newest_first(map_chapters(list, base_path), API_CHAP:find("asc", 1, true) ~= nil)
+    m.totalPages = 1
+    if API_CHAP ~= "" and list == nil then m.incomplete = true end
+    return m
+end
+
+function ext:parseChapter(path)
+    local html = get(path)
+    if not html then return "<p>Chapitre injoignable.</p>" end
+    local st = rsc_stream(html)
+    local raw = find_obj(st, NK_CHAP)
+    local ch = raw and jdecode(raw)
+    if type(ch) ~= "table" then return "<p>Impossible d'extraire le contenu de ce chapitre.</p>" end
+    if ch.isPremium then return "<p>Ce chapitre est réservé aux membres Premium.</p>" end
+    local rows, parts = rsc_rows(st), {}
+    local title = resolve(ch.title, rows)
+    if type(title) == "string" and title ~= "" then parts[#parts + 1] = "<h1>" .. esc_html(dec(title)) .. "</h1>" end
+    if NK_PARA ~= "" and type(ch[NK_PARA]) == "table" then
+        for _, p in ipairs(ch[NK_PARA]) do
+            local t = type(p) == "table" and p[NK_TEXT] or (type(p) == "string" and p) or nil
+            t = resolve(t, rows)
+            if type(t) == "string" and t ~= "" then parts[#parts + 1] = "<p>" .. esc_html(dec(t)) .. "</p>" end
+        end
+    elseif NK_CONTENT ~= "" then
+        local t = resolve(ch[NK_CONTENT], rows)
+        if type(t) == "string" then
+            if t:find("<p", 1, true) then parts[#parts + 1] = t
+            else for line in (t .. NL):gmatch("(.-)" .. NL) do if line:match("%S") then parts[#parts + 1] = "<p>" .. esc_html(line) .. "</p>" end end end
+        end
+    end
+    if #parts == 0 then return "<p>Texte du chapitre introuvable (clé « " .. NK_CHAP .. " »).</p>" end
+    return table.concat(parts, NL)
+end
+${c.apiSearch?`
+function ext:searchNovels(term, page)
+    if page and page > 1 then return { novels = {} } end
+    term = tostring(term or ""):match("^%s*(.-)%s*$")
+    if term == "" then return ext:popularNovels(page) end
+    local url = API_SEARCH:gsub("{q}", function() return enc(term) end)
+    local body = get(url)
+    local data = body and jdecode(body)
+    if type(data) ~= "table" then return { novels = {}, error = "Recherche impossible" } end
+    if not data[1] then data = data.novels or data.results or data.items or data end
+    local out, seen = {}, {}
+    for _, n in ipairs(data) do
+        if type(n) == "table" and type(n.slug) == "string" and not seen[n.slug] then
+            seen[n.slug] = true
+            out[#out + 1] = { name = dec(tostring(n.title or n.name or n.slug)), path = LISTP:gsub("/+$", "") .. "/" .. n.slug,
+                cover = abs(pick(n, { "coverImage", "cover", "coverUrl", "image", "thumbnail" })) }
+        end
+    end
+    return { novels = out }
+end
+`:''}`}
+function genLua(c){const id=c.name.toLowerCase().replace(/[^a-z0-9]/g,'')||'source',man=c.type=='manga',nx=!!c.next&&c.type!='manga';
 return {id,code:`-- ${c.name} — source générée par Sefirah Source Hub (modèle sans IA). À relire et tester.
 -- Contrat : voir extensions/mangapill.lua du plugin Sefirah.
 local logger = require("logger")
@@ -341,7 +561,7 @@ function ext:parseChapter(path)
     if not body or #body < 50 then return "<p>Texte du chapitre introuvable (classe « " .. CONT .. " »).</p>" end
     return body
 end
-`}
+`}${nx?nextLua(c):''}
 return ext
 `,meta:`{ id = "${id}", name = "${ls(c.name)}", site = "${ls(c.base)}", lang = "${ls(c.lang)}", version = "${ls(c.ver)}", runtime = "lua"${man?', type = "manga"':''} },`}}
 const PXB=()=>LS.get('px','').replace(/\/+$/,'');
@@ -384,6 +604,8 @@ const HINTS=[
  [/Lecture : aucune image/,"Aucune image de manga trouvée. Laisse « Classe CSS des images » vide pour prendre toutes les images, ou ouvre un chapitre, clic droit sur une page › Inspecter, et copie le nom de la classe (class=\"…\") de l'image."],
  [/Image 1 : HTTP/,"L'image existe mais le site refuse de la donner à un navigateur (souvent faute de « Referer »). Le .lua généré envoie ce Referer : essaie-le directement dans KOReader pour savoir si ça marche."],
  [/Image 1 : accessibilité/,"Non bloquant : le navigateur ne peut pas vérifier les images (Referer / CORS). Le vrai test se fait dans KOReader."],
+ [/Next\.js : aucune liste de chapitres/,"Les chapitres de ce site Next.js ne sont ni dans la page ni devinables. Ouvre un roman dans ton navigateur, F12 › Network › filtre Fetch/XHR, repère la requête qui renvoie les chapitres (ex. /api/chapters/<slug>?skip=0&take=50), remplace le slug par {slug} et le skip par {skip}, colle-la dans « Adresse API des chapitres » (Réglages détectés › Mode Next.js), puis « Régénérer et tester »."],
+ [/Next\.js : (objet de la fiche|l'API|API)|Lecture : texte du chapitre introuvable dans le flux/,"Le Hub n'a pas reconnu les données dans le flux Next.js. Dans « Mode Next.js », renseigne à la main la clé JSON de la fiche / du chapitre (cherche-la dans le code source de la page, dans les self.__next_f.push) ou l'adresse API des chapitres, puis « Régénérer et tester »."],
  [/rendu par JavaScript \(Next/,"Le texte du chapitre n'existe pas comme balise HTML : le site (Next.js / React) le construit avec JavaScript. Un .lua généré ne peut pas le lire et aucun réglage ne le répare. Regarde dans l'onglet Catalogue si une source existe déjà pour ce site (c'est le cas de NovelFrance), sinon il faut l'écrire à la main avec l'API du site."],
  [/conteneur « .* » introuvable/,"La classe CSS du texte est vide ou fausse. Ouvre un chapitre, clic droit sur le texte › Inspecter, remonte jusqu'à la balise <div class=\"…\"> qui entoure tout le texte et copie le nom de la classe dans « Classe CSS du texte (roman) ». Puis « Régénérer et tester »."],
  [/Lecture : texte très court/,"La classe choisie ne contient qu'un morceau du chapitre. Dans « Inspecter », remonte à la balise parente qui contient tous les paragraphes et utilise sa classe dans « Classe CSS du texte »."]
@@ -411,6 +633,35 @@ async function analyzeHome(u){
  if(f){const i=f.querySelector('input[name]');if(i)CFG.search=new URL(f.getAttribute('action')||'/',base).href+'?'+i.name+'={q}'}
  if(top[0])CFG.list=top[0][0];
  return {p,d}}
+
+// ---------- mode Next.js (RSC) : même logique que le .lua généré
+function rscStream(html){const out=[],re=/\.push\(\[1,"/g;let m;
+ while((m=re.exec(html))){const i=m.index+m[0].length;let j=i;
+  for(;j<html.length;j++){const ch=html[j];if(ch=='\\'){j++;continue}if(ch=='"')break}
+  try{out.push(JSON.parse('"'+html.slice(i,j)+'"'))}catch{}
+  re.lastIndex=j+1}
+ return out.join('')}
+function balanced(text,key){const n='"'+key+'":{',s=text.indexOf(n);if(s<0)return null;let d=0,str=false,esc=false;
+ for(let i=s+n.length-1;i<text.length;i++){const c=text[i];
+  if(str){if(esc)esc=false;else if(c=='\\')esc=true;else if(c=='"')str=false}
+  else if(c=='"')str=true;else if(c=='{')d++;else if(c=='}'){d--;if(!d)return text.slice(s+n.length-1,i+1)}}
+ return null}
+function rscObjects(st){const r=[],seen=new Set(),re=/"([A-Za-z_]\w{2,40})":\{/g;let m;
+ while((m=re.exec(st))&&seen.size<400){if(seen.has(m[1]))continue;seen.add(m[1]);const raw=balanced(st,m[1]);if(!raw||raw.length<80)continue;try{r.push([m[1],JSON.parse(raw)])}catch{}}
+ return r}
+const NK_TXT=['content','text','body','paragraph'];
+function findParas(o,d=0){if(!o||typeof o!='object'||d>3)return null;
+ for(const [k,v] of Object.entries(o)){
+  if(Array.isArray(v)&&v.length>=5&&v.every(x=>x&&typeof x=='object'||typeof x=='string')){
+   if(typeof v[0]=='string'&&v[0].length>10)return{para:k,text:''};
+   const f0=v[0]||{},tk=Object.keys(f0).find(f=>typeof f0[f]=='string'&&f0[f].length>10&&NK_TXT.includes(f))||Object.keys(f0).find(f=>typeof f0[f]=='string'&&f0[f].length>40);
+   if(tk)return{para:k,text:tk}}
+  const r=(v&&typeof v=='object'&&!Array.isArray(v))?findParas(v,d+1):null;if(r)return r}
+ return null}
+function discoverChapter(objs){for(const [k,o] of objs){const p=findParas(o);if(p)return{nkChap:k,nkPara:p.para,nkText:p.text,nkContent:''};
+  const lf=Object.entries(o).find(([f,v])=>typeof v=='string'&&v.length>1500&&/<p|\n\n/.test(v));if(lf)return{nkChap:k,nkPara:'',nkText:'',nkContent:lf[0]}}return null}
+function discoverNovel(objs){const o=objs.find(([k,o])=>typeof o.title=='string'&&('description' in o||'synopsis' in o)&&(o.slug||o.coverImage||o.cover));return o?o[0]:null}
+function discoverList(nov,pref){if(pref&&Array.isArray(nov[pref]))return pref;return Object.keys(nov).find(f=>Array.isArray(nov[f])&&nov[f].length>=3&&nov[f].every(x=>x&&x.slug&&(x.title||x.name)))||null}
 
 // tests réels (réseau) d'une configuration -> liste de [ok|w|e|s, message]
 async function runTests(c){
@@ -448,7 +699,33 @@ async function runTests(c){
   const og=fd.querySelector('meta[property="og:description"]')?.content||'';
   /(\.\.\.|…)\s*$/.test(og)&&add('w','Fiche : description tronquée dans og:description (le .lua cherche la version complète)');
   /&#x?[0-9a-f]+;/i.test(f.text)&&add('ok','Fiche : entités HTML numériques (&#x27;…) présentes, décodées par le .lua généré');
-  const cl=links(fd,chap);
+  const st=man?'':rscStream(f.text),nextSite=st.length>500,npath=(()=>{try{return new URL(first,base+'/').pathname.replace(/\/+$/,'')}catch{return first}})();
+  // mode Next.js : le texte (et parfois les chapitres) viennent du JSON de self.__next_f
+  const nm=async chHtml=>{
+   const K={nkNovel:c.nkNovel,nkChap:c.nkChap,nkPara:c.nkPara,nkText:c.nkText,nkContent:c.nkContent,nkList:c.nkList};
+   add('ok','Next.js : mode activé (le .lua lira le JSON de self.__next_f)');
+   const objs=rscObjects(st);K.nkNovel=K.nkNovel||discoverNovel(objs)||'';
+   const nov=(objs.find(x=>x[0]==K.nkNovel)||[])[1];
+   nov?add('ok','Next.js : fiche lue dans « '+K.nkNovel+' » (titre : '+String(nov.title).slice(0,40)+')'):add('e','Next.js : objet de la fiche introuvable dans le flux (le Hub cherche un objet avec title + description)');
+   let slugs=[];const ax=c.apiChap;
+   if(ax){const slug=npath.split('/').filter(Boolean).pop();
+    try{const r=await getPage((/^https?:/.test(ax)?'':base)+ax.replace('{slug}',slug).replace('{skip}','0'));const j=JSON.parse(r.text);
+     const a=j.chapters||j.data||j.items||(Array.isArray(j)?j:[]);slugs=a.map(x=>x&&x.slug).filter(Boolean);
+     slugs.length?add('ok','Next.js : API des chapitres → '+slugs.length+' chapitres (total '+(j.total??'?')+')'):add('e','Next.js : l\'API des chapitres n\'a renvoyé aucun chapitre')}
+    catch(e){add('e','Next.js : API des chapitres illisible ('+e.message+')')}}
+   else if(nov){const lf=discoverList(nov,K.nkList);if(lf){K.nkList=lf;slugs=nov[lf].map(x=>x.slug);add('ok','Next.js : '+slugs.length+' chapitres dans le champ « '+lf+' » de la fiche')}}
+   if(!slugs.length&&!chHtml)add('e','Next.js : aucune liste de chapitres trouvée. Cherche l\'adresse API des chapitres dans DevTools › Network.');
+   let html2=chHtml;
+   if(!html2&&slugs.length){try{html2=(await getPage(base+npath+'/'+slugs[0])).text}catch(e){add('e','Next.js : chapitre illisible ('+e.message+')')}}
+   if(html2){const objs2=rscObjects(rscStream(html2));
+    const d=(K.nkChap&&objs2.find(x=>x[0]==K.nkChap)&&(K.nkPara||K.nkContent))?{}:discoverChapter(objs2);
+    if(d){Object.assign(K,d);const o=(objs2.find(x=>x[0]==K.nkChap)||[])[1]||{};
+     const tx=K.nkPara?(o[K.nkPara]||[]).map(p=>typeof p=='string'?p:(p&&p[K.nkText])||'').join(' '):String(o[K.nkContent]||'');
+     tx.length>500?add('ok','Lecture : texte extrait de « '+K.nkChap+' » ('+tx.length+' car.)'):add('w','Lecture : texte très court ('+tx.length+' car.)')}
+    else add('e','Lecture : texte du chapitre introuvable dans le flux Next.js')}
+   Object.assign(CFG,K,{next:true})};
+  const cl=chap?links(fd,chap):[];
+  if(nextSite&&(c.next||!cl.length)){await nm();return R}
   if(!cl.length){add('e','Aucun lien de chapitre contenant « '+chap+' »');return R}
   add('ok','Chapitres : '+cl.length+' liens');
   const nums=cl.map(a=>+(a.textContent.match(/(\d+(?:\.\d+)?)\s*$/)||a.textContent.match(/(\d+(?:\.\d+)?)/)||[])[1]).filter(x=>!isNaN(x));
@@ -463,7 +740,7 @@ async function runTests(c){
    if(im[0]){const u=new URL(im[0].getAttribute('data-src')||im[0].getAttribute('src'),base+'/').href;try{const r=await getPage(u);r.status<400?add('ok','Image 1 accessible (HTTP '+r.status+')'):add('e','Image 1 : HTTP '+r.status)}catch{add('w','Image 1 : accessibilité non vérifiable depuis le navigateur (Referer/CORS)')}}}
   else{
    const cc=c.cont,el=cc&&cd.querySelector('[class*="'+cc+'"]');
-   if(!el){/__next_f|__NEXT_DATA__/.test(ch.text)?add('e','Lecture : le texte est rendu par JavaScript (Next.js), pas dans une balise HTML lisible.'):add('e','Lecture : conteneur « '+(cc||'')+' » introuvable')}
+   if(!el){/__next_f|__NEXT_DATA__/.test(ch.text)?await nm(ch.text):add('e','Lecture : conteneur « '+(cc||'')+' » introuvable')}
    else{const n=el.textContent.trim().length;n>500?add('ok','Lecture : texte extrait ('+n+' car.)'):add('w','Lecture : texte très court ('+n+' car.)');el.querySelector('div')&&add('ok','Le conteneur contient des <div> imbriquées : gérées par le .lua généré')}}
  }catch(e){add('e',e.message)}
  return R}
@@ -473,8 +750,8 @@ function renderResult(tests,info,openAdv){
  const c=cfg(),g=genLua(c),bad=tests.filter(t=>t[0]=='e'),miss=[];
  if(!c.search)miss.push('search');
  if(!c.list)miss.push('list');
- if(!c.chap)miss.push('chap');
- if(c.type=='novel'&&!c.cont)miss.push('cont');
+ if(!c.chap&&!c.next)miss.push('chap');
+ if(c.type=='novel'&&!c.cont&&!c.next)miss.push('cont');
  const k=miss.length?'e':bad.length?'w':'ok',ic={ok:'✔',w:'⚠',e:'✘',s:'⏭'};
  const msg=miss.length?`✘ Fichier incomplet : il manque ${miss.map(m=>MISS[m][0]).join(', ')}.`
   :bad.length?`⚠ Fichier généré, mais ${bad.length} test(s) en échec. Lis les « Comment réparer » ci-dessous.`
@@ -491,6 +768,12 @@ function renderResult(tests,info,openAdv){
   ${inp('a_search','Adresse d\'une recherche HTML (avec {q} et {page})',c.search,'https://exemple.com/search?q={q}')}
   <div class="row"><div>${inp('a_list','Liens d\'œuvre contiennent',c.list,'/novel/')}</div><div>${inp('a_chap','Liens de chapitre contiennent',c.chap,'/chapter/')}</div></div>
   <div class="row"><div>${inp('a_cont','Classe CSS du texte (roman)',c.cont,'chapter-content')}</div><div>${inp('a_img','Classe CSS des images (manga)',c.img,'page-img')}</div><div><label>Ordre des chapitres</label><select id="a_rev"><option value="0" ${c.rev?'':'selected'}>Tel quel</option><option value="1" ${c.rev?'selected':''}>Inverser</option></select></div></div>
+  <p style="margin:12px 0 2px"><b>Mode Next.js</b> <small>(sites React dont le texte est dans self.__next_f ; rempli automatiquement quand il est détecté)</small></p>
+  <div class="row"><div><label>Mode</label><select id="a_next"><option value="0" ${c.next?'':'selected'}>Désactivé</option><option value="1" ${c.next?'selected':''}>Activé</option></select></div><div>${inp('a_nkn','Clé JSON de la fiche',c.nkNovel,'initialNovel')}</div><div>${inp('a_nkc','Clé JSON du chapitre',c.nkChap,'initialChapter')}</div></div>
+  <div class="row"><div>${inp('a_nkp','Champ « liste de paragraphes »',c.nkPara,'paragraphs')}</div><div>${inp('a_nkt','Champ texte d\'un paragraphe',c.nkText,'content')}</div><div>${inp('a_nkx','Ou champ texte unique',c.nkContent,'content')}</div></div>
+  ${inp('a_apic','Adresse API des chapitres (avec {slug} et {skip})',c.apiChap,'/api/chapters/{slug}?skip={skip}&take=50&order=asc')}
+  ${inp('a_apis','Adresse API de recherche (avec {q}), facultatif',c.apiSearch,'/api/search/autocomplete?q={q}')}
+  <span class="hint">L'adresse API se trouve dans DevTools › Network (filtre Fetch/XHR) quand tu ouvres un roman.</span>
   <div class="row"><button class="b" id="a_go">Régénérer et tester</button></div></details>
  <h2 class="st" style="margin-top:14px">Installer</h2><ol style="margin:4px 0;padding-left:20px">
   <li>Copie <code>${H(g.id)}.lua</code> dans <code>koreader/plugins/sefirah.koplugin/extensions/</code>.</li>
@@ -502,7 +785,7 @@ function renderResult(tests,info,openAdv){
  $('#vwb').onclick=()=>viewCode(g.id+'.lua',g.code);
  $('#mtb').onclick=e=>cp(g.meta,e.target);
  $('#a_go').onclick=async e=>{const b=e.target,v=id=>$('#'+id).value.trim();b.disabled=true;b.textContent='Test en cours…';
-  CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1'};
+  CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1',next:v('a_next')=='1',nkNovel:v('a_nkn'),nkChap:v('a_nkc'),nkPara:v('a_nkp'),nkText:v('a_nkt'),nkContent:v('a_nkx'),apiChap:v('a_apic'),apiSearch:v('a_apis')};
   renderResult(await runTests(cfg()),info,true)}}
 
 // bouton principal
