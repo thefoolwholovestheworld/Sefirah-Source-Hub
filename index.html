@@ -766,7 +766,7 @@ function renderResult(tests,info,openAdv){
   :'✔ Fichier généré : tous les tests bloquants sont passés.';
  const why=info.ai?'Réglages établis par l\'IA.':'Réglages devinés sans IA (heuristiques)'+(info.aiWhy?' — '+H(info.aiWhy):'')+'.';
  const inp=(id,l,v,ph)=>`<label>${l}</label><input id="${id}" value="${H(v)}" placeholder="${H(ph||'')}">`;
- $('#cout').innerHTML=`<div class="card"><div class="sh">${ico(c.base,32)}<div><b>${H(c.name)}</b><br><small>${H(c.base.replace(/^https?:\/\//,''))}</small></div></div><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
+ $('#cout').innerHTML=`<div class="card"><div class="sh">${ico(c.base,32)}<div><b>${H(c.name)}</b><br><small>${H(c.base.replace(/^https?:\/\//,''))}</small></div><button class="b s" id="icb" style="margin-left:auto">⬇ Icône</button></div><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
  ${miss.map(m=>`<span class="fx">🛠 Pour trouver ${H(MISS[m][0])} : ${H(MISS[m][1])}</span>`).join('')}
  <small>${why}</small>${info.aiWhy?fx(info.aiWhy):''}
  <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
@@ -789,6 +789,11 @@ function renderResult(tests,info,openAdv){
   <li>Redémarre KOReader › Sefirah › Sources › installe la source.</li></ol>
  <p class="w" style="margin-bottom:0"><small>Le code n'est pas testé dans KOReader : essaie-le sur ta liseuse et vérifie la licence / les conditions d'utilisation du site.</small></p></div>`;
  hookIco($('#cout'));
+ $('#icb').onclick=async e=>{const b=e.target,o=new URL(c.base).origin,urls=['https://www.google.com/s2/favicons?sz=128&domain_url='+encodeURIComponent(o),o+'/favicon.ico'];
+  for(const u of urls){try{const r=await fetch(u);if(!r.ok)continue;const bl=await r.blob();if(!/^image\//.test(bl.type))continue;
+   const ext=(bl.type.split('/')[1]||'png').replace('x-icon','ico').replace('vnd.microsoft.icon','ico').replace('svg+xml','svg'),a=document.createElement('a');
+   a.href=URL.createObjectURL(bl);a.download=g.id+'-icon.'+ext;a.click();b.textContent='Icône téléchargée ✔';return}catch{}}
+  window.open(urls[0],'_blank');b.textContent='Image ouverte : enregistre-la'};
  $('#dlb').onclick=()=>dl(g.id+'.lua',g.code);
  $('#cpb').onclick=e=>cp(g.code,e.target);
  $('#vwb').onclick=()=>viewCode(g.id+'.lua',g.code);
