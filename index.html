@@ -1,4 +1,4 @@
-a<!doctype html>
+<!doctype html>
 <html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sefirah Source Hub</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>%3Crect width='64' height='64' rx='14' fill='%235b3fd0'/>%3Cpath d='M10 16 Q21 12 31 20 L31 49 Q21 41 10 45 Z M54 16 Q43 12 33 20 L33 49 Q43 41 54 45 Z' fill='white' stroke='white' stroke-width='2' stroke-linejoin='round'/>%3Cpath d='M32 20 L32 49' stroke='%235b3fd0' stroke-width='2'/>%3C/svg%3E">
@@ -1158,11 +1158,30 @@ async function generate(){
   try{const u=new URL($('#cu').value.trim());CFG.name=CFG.name||u.hostname.replace(/^www\./,'');renderResult([['e',e.message]],{ai:false,aiWhy:''})}catch{}}
  finally{btn.disabled=false}}
 // ---------- recevoir une source sur la liseuse : le site crée un code à 4 chiffres
+async function relayIconBase64(siteOrigin){
+ // Le relais actuel transmet déjà le champ lua. On ajoute donc le PNG en commentaire
+ // Lua temporaire : le plugin le retire avant d'installer la source.
+ const u='https://www.google.com/s2/favicons?sz=128&domain_url='+encodeURIComponent(siteOrigin);
+ const r=await fetch(u);if(!r.ok)throw new Error('Icône indisponible');
+ const blob=await r.blob();
+ if(blob.type!=='image/png' && blob.type!=='image/x-png')throw new Error('Icône non-PNG');
+ const bytes=new Uint8Array(await blob.arrayBuffer());
+ if(bytes.length<8 || bytes.length>100000)throw new Error('Taille d’icône invalide');
+ let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,Math.min(i+0x8000,bytes.length)));
+ return btoa(binary);
+}
 async function relayPublish(id,code,box){
- box.innerHTML='<span class="sp"></span> Préparation du code pour la liseuse…';
- try{const r=await fetch(PROXY+'/relay/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,lua:code})});
+ box.innerHTML='<span class="sp"></span> Préparation du code et de l’icône pour la liseuse…';
+ try{
+  let luaForRelay=code,iconNote='Icône incluse';
+  try{
+   const origin=new URL($('#cu').value.trim()).origin;
+   const icon64=await relayIconBase64(origin);
+   luaForRelay+='\\n--SEFIRAH_ICON_PNG_BASE64:'+icon64;
+  }catch(iconErr){iconNote='Icône non disponible automatiquement : la source sera envoyée sans icône';}
+  const r=await fetch(PROXY+'/relay/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,lua:luaForRelay})});
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Erreur '+r.status);
-  box.innerHTML=`<div class="card" style="text-align:center"><div>📡 Code pour la liseuse</div><div style="font-size:42px;font-weight:700;letter-spacing:.2em;color:var(--a)">${H(j.code)}</div><small>Sur la liseuse : Sefirah › Sources › icône antenne, puis tape ce code.<br>Valable 10 minutes, utilisable une seule fois.</small></div>`}
+  box.innerHTML=`<div class="card" style="text-align:center"><div>📡 Code pour la liseuse</div><div style="font-size:42px;font-weight:700;letter-spacing:.2em;color:var(--a)">${H(j.code)}</div><small>Sur la liseuse : Sefirah › Sources › icône antenne, puis tape ce code.<br>Valable 10 minutes, utilisable une seule fois.<br>${H(iconNote)}</small></div>`}
  catch(e){box.innerHTML='<p class="w">⚠ Code pour la liseuse indisponible ('+H(e.message)+'). Tu peux quand même télécharger le fichier.</p>'}}
 
 // ---------- 🆘 aide : le débutant colle le code source d'une page, le Hub le lit à sa place
