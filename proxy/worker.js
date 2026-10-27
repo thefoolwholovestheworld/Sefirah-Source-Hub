@@ -55,7 +55,8 @@ export default {
           ],
           max_tokens: 1600
         });
-        const answer = result && (result.response || result.output_text || result.text);
+        let answer = result && (result.response ?? result.output_text ?? result.text);
+        if (answer && typeof answer === 'object') answer = JSON.stringify(answer); // le modèle renvoie parfois un objet JSON déjà analysé
         if (typeof answer !== 'string' || !answer.trim()) return json({ error: 'Réponse vide du modèle IA.' }, 502, cors);
         return json({ text: answer }, 200, cors);
       } catch (e) {
