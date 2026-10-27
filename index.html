@@ -847,4 +847,182 @@ $('#cai').onclick=generate;
 $('#cu').addEventListener('keydown',e=>{if(e.key=='Enter')generate()});
 show(TABS.some(t=>t[0]==location.hash.slice(1))?location.hash.slice(1):'creer');
 
-</script></body></html>
+</script>
+<script>
+/* Sefirah Source Hub — aperçu « Tester sur liseuse ».
+   Ajoute un bouton après la génération : il ouvre une maquette de liseuse qui montre
+   Parcourir, la fiche d'une œuvre et le lecteur, avec les vraies données du site et les
+   réglages en cours (avant d'envoyer la source). Aucun changement ailleurs dans index.html. */
+(function(){
+const css=`
+#pv{width:min(460px,96vw);padding:10px;background:var(--c);color:var(--t);border:1px solid var(--b);border-radius:12px}
+#pv .top{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:6px}
+#pv .note{font-size:12px;color:var(--m);margin:0 0 8px}
+.rd{background:#2b2b2e;border-radius:22px;padding:14px 14px 22px;margin:0 auto;max-width:400px}
+.rd .scr{background:#fbfbf8;color:#111;height:min(66vh,560px);border-radius:6px;display:flex;flex-direction:column;overflow:hidden;font:14px/1.4 Georgia,serif;filter:grayscale(1) contrast(1.05)}
+.rd .hd{padding:8px 10px;border-bottom:2px solid #111;font:700 16px system-ui,sans-serif;display:flex;gap:8px;align-items:center}
+.rd .hd span{flex:1}.rd .hd small{color:#555;font-weight:400}
+.rd .bd{flex:1;overflow:auto;padding:0}
+.rd .tabs{display:flex;border-top:2px solid #111}
+.rd .tabs button{flex:1;border:0;background:#fbfbf8;color:#111;padding:9px 2px;font:600 13px system-ui,sans-serif;cursor:pointer}
+.rd .tabs button.on{background:#111;color:#fff}
+.rd .row{display:flex;gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid #bbb;cursor:pointer}
+.rd .row img,.rd .row .tile{width:44px;height:62px;object-fit:cover;border:1px solid #888;flex:none;background:#ddd}
+.rd .row .tile{display:grid;place-items:center;background:#111;color:#fff;font:700 15px system-ui;border-radius:8px;width:44px;height:44px}
+.rd .row b{font:700 14px system-ui,sans-serif;display:block}.rd .row small{color:#555;font:12px system-ui}
+.rd .srch{display:flex;gap:6px;padding:8px 10px;border-bottom:1px solid #bbb}
+.rd .srch input{flex:1;border:1px solid #111;border-radius:6px;padding:6px;background:#fff;color:#111;font:13px system-ui;min-width:0}
+.rd .srch button,.rd .btn{border:2px solid #111;background:#fff;color:#111;border-radius:6px;padding:5px 10px;font:600 13px system-ui;cursor:pointer}
+.rd .pad{padding:10px 12px}.rd h3{margin:0 0 6px;font:700 17px system-ui,sans-serif}
+.rd .cv{float:left;width:84px;margin:0 10px 6px 0;border:1px solid #888}
+.rd .sum{font-size:13px;white-space:pre-line}.rd .ch{padding:7px 12px;border-bottom:1px solid #ddd;font:13px system-ui,sans-serif;cursor:pointer}
+.rd .txt p{margin:0 0 .8em;text-indent:1.2em;font-size:15px}.rd .txt img{display:block;width:100%;margin:0 0 2px}
+.rd .nav{display:flex;gap:8px;justify-content:space-between;padding:8px 10px;border-top:1px solid #bbb}
+.rd .err{padding:14px;font:13px system-ui,sans-serif;color:#000}.rd .ld{padding:14px;font:13px system-ui,sans-serif;color:#444}`;
+const st=document.createElement('style');st.textContent=css;document.head.append(st);
+let dlg=document.getElementById('pv');
+if(!dlg){dlg=document.createElement('dialog');dlg.id='pv';document.body.append(dlg)}
+
+const enc=encodeURIComponent;
+const unnext=u=>{const m=u.match(/\/_next\/image\?url=([^&]+)/);return m?decodeURIComponent(m[1]):u};
+const initials=n=>{const c=(n||'?').replace(/[^A-Z]/g,'');return c.length>=2?c.slice(0,2):(n||'?').slice(0,2).toUpperCase()};
+const normP=(h,b)=>{try{return new URL(h,b+'/').pathname.replace(/\/+$/,'').toLowerCase()}catch{return String(h)}};
+const relP=(h,b)=>{try{const u=new URL(h,b+'/');return u.pathname+u.search}catch{return h}};
+function coverOf(img,b){if(!img)return'';
+ for(const k of['data-src','data-lazy-src','data-original','src','srcset']){let u=img.getAttribute(k);
+  if(k=='srcset'&&u)u=u.trim().split(/\s+/)[0];
+  if(u&&!/^data:/.test(u)&&!/placeholder|blank/i.test(u))return unnext(new URL(u,b+'/').href)}return''}
+
+// mêmes règles que parse_list du .lua généré
+function listItems(doc,c){const out=[],idx={};
+ doc.querySelectorAll('a[href]').forEach(a=>{const h=a.getAttribute('href')||'';
+  if(!c.list||!h.includes(c.list)||(c.chap&&h.includes(c.chap)))return;
+  const k=normP(h,c.base),img=a.querySelector('img');
+  let name=a.getAttribute('title')||(img&&img.getAttribute('alt'))||a.textContent;name=(name||'').trim().replace(/\s+/g,' ');
+  const cover=coverOf(img,c.base);
+  if(idx[k]){if(!idx[k].name&&name)idx[k].name=name;if(!idx[k].cover&&cover)idx[k].cover=cover}
+  else{idx[k]={name,path:relP(h,c.base),cover};out.push(idx[k])}});
+ return out.filter(x=>x.name)}
+
+async function loadList(c,term){
+ const url=term?c.search.replace('{q}',enc(term)).replace('{page}','1'):c.base+'/';
+ if(term&&!c.search)throw new Error('Pas d\'adresse de recherche dans les réglages.');
+ const p=await getPage(url);
+ if(blocked(p))throw new Error('Site protégé (anti-bot) : aperçu impossible.');
+ if(p.status>=400)throw new Error('HTTP '+p.status);
+ return listItems(dom(p.text),c)}
+
+function metaOf(doc,path){
+ const name=(doc.querySelector('h1')?.textContent||doc.querySelector('meta[property="og:title"]')?.content||path).trim();
+ let sum=doc.querySelector('meta[property="og:description"]')?.content||doc.querySelector('meta[name="description"]')?.content||'';
+ if(!sum||/(\.\.\.|…)$/.test(sum)||sum.length<200){const head=sum.replace(/\s+/g,' ').slice(0,25);
+  for(const k of['synopsis','summary','description','resume','story','desc']){
+   const e=[...doc.querySelectorAll('[class*="'+k+'"]')].find(x=>x.querySelectorAll('a').length<=3&&x.textContent.trim().length>60&&x.textContent.length<4000&&(!head||x.textContent.replace(/\s+/g,' ').includes(head)));
+   if(e){sum=e.innerText||e.textContent;break}}}
+ const cover=doc.querySelector('meta[property="og:image"]')?.content||'';
+ return{name,summary:sum.trim(),cover}}
+
+async function loadNovel(c,path){
+ const url=new URL(path,c.base+'/').href,p=await getPage(url),doc=dom(p.text),m=metaOf(doc,path);
+ let chs=[];
+ if(c.next&&c.nkNovel){
+  const st=rscStream(p.text),raw=balanced(st,c.nkNovel);let nov=null;try{nov=raw&&JSON.parse(raw)}catch{}
+  if(nov){if(typeof nov.title=='string')m.name=nov.title;
+   const d=nov.description||nov.synopsis;if(typeof d=='string'&&d[0]!='$')m.summary=d;
+   const ci=nov.coverImage||nov.cover||nov.image;if(typeof ci=='string')m.cover=new URL(ci,c.base+'/').href;
+   const base=path.replace(/\/+$/,'');
+   if(c.apiChap){try{const slug=base.split('/').pop(),r=await getPage((/^https?:/.test(c.apiChap)?'':c.base)+c.apiChap.replace('{slug}',slug).replace('{skip}','0')),j=JSON.parse(r.text);
+     const a=j.chapters||j.data||j.items||(Array.isArray(j)?j:[]);chs=a.filter(x=>x&&x.slug).map((x,i)=>({name:String(x.title||x.name||'Chapitre '+(i+1)),path:base+'/'+x.slug}))}catch{}}
+   else if(c.nkList&&Array.isArray(nov[c.nkList]))chs=nov[c.nkList].filter(x=>x&&x.slug).map((x,i)=>({name:String(x.title||x.name||'Chapitre '+(i+1)),path:base+'/'+x.slug}))}}
+ else{const seen={};
+  doc.querySelectorAll('a[href]').forEach(a=>{const h=a.getAttribute('href')||'';
+   if(!c.chap||!h.includes(c.chap)||seen[normP(h,c.base)])return;seen[normP(h,c.base)]=1;
+   let n=a.textContent.trim().replace(/\s+/g,' ')||a.getAttribute('title')||'Chapitre '+(chs.length+1);chs.push({name:n,path:relP(h,c.base)})});
+  if(c.rev)chs.reverse()}
+ return{...m,chapters:chs}}
+
+async function loadChapter(c,path){
+ const url=new URL(path,c.base+'/').href,p=await getPage(url);
+ if(blocked(p))throw new Error('Page de lecture protégée (anti-bot).');
+ if(p.status>=400)throw new Error('HTTP '+p.status);
+ const doc=dom(p.text);
+ if(c.type=='manga'){
+  const im=[...doc.querySelectorAll('img')].filter(i=>!c.img||(i.className||'').includes(c.img)).map(i=>i.getAttribute('data-src')||i.getAttribute('data-lazy-src')||i.getAttribute('data-original')||i.getAttribute('src')).filter(u=>u&&!/^data:/.test(u)&&!/logo/.test(u)).map(u=>new URL(u,c.base+'/').href);
+  if(!im.length)throw new Error('Aucune image de page trouvée.');
+  return{images:[...new Set(im)]}}
+ if(c.next&&(c.nkPara||c.nkContent)){
+  const raw=balanced(rscStream(p.text),c.nkChap);let o=null;try{o=raw&&JSON.parse(raw)}catch{}
+  if(o){let ps=[];
+   if(c.nkPara&&Array.isArray(o[c.nkPara]))ps=o[c.nkPara].map(x=>typeof x=='string'?x:(x&&x[c.nkText])||'');
+   else if(typeof o[c.nkContent]=='string')ps=o[c.nkContent].split(/\n+/);
+   ps=ps.filter(x=>x&&x[0]!='$'&&x.trim());if(ps.length)return{paras:ps}}}
+ const el=c.cont&&doc.querySelector('[class*="'+c.cont+'"]');
+ let ps=[];
+ if(el){ps=[...el.querySelectorAll('p')].map(x=>x.textContent.trim()).filter(Boolean);
+  if(!ps.length)ps=el.textContent.split(/\n+/).map(x=>x.trim()).filter(Boolean)}
+ if(!ps.length)ps=[...doc.querySelectorAll('p')].map(x=>x.textContent.trim()).filter(x=>x.length>1);
+ if(!ps.length)throw new Error('Texte du chapitre introuvable (classe « '+(c.cont||'')+' »).');
+ return{paras:ps}}
+
+// ---------- interface
+function open(){
+ const c=cfg();let tab='browse',term='',view={k:'browse'};
+ const box=()=>dlg.querySelector('.scr');
+ function frame(){
+  dlg.innerHTML=`<div class="top"><b>📱 Aperçu sur liseuse</b><button class="b s" id="pvx">Fermer</button></div>
+  <p class="note">Maquette en niveaux de gris avec les vraies données du site et tes réglages actuels. Le rendu exact se vérifie dans KOReader.</p>
+  <div class="rd"><div class="scr"><div class="hd" id="pvh"></div><div class="bd" id="pvb"></div>
+  <div class="tabs"><button data-t="lib">Bibliothèque</button><button data-t="browse">Parcourir</button><button data-t="src">Sources</button></div></div></div>`;
+  dlg.querySelector('#pvx').onclick=()=>dlg.close();
+  dlg.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;view={k:tab=='browse'?'browse':tab};draw()})}
+ const hd=(t,sub,back)=>{const h=dlg.querySelector('#pvh');h.innerHTML=(back?'<button class="btn" id="pvback">←</button>':'')+'<span>'+H(t)+(sub?' <small>'+H(sub)+'</small>':'')+'</span>';
+  if(back)h.querySelector('#pvback').onclick=back};
+ const body=h=>{dlg.querySelector('#pvb').innerHTML=h;return dlg.querySelector('#pvb')};
+ dlg.querySelectorAll('.tabs button').forEach(()=>{});
+ async function draw(){
+  dlg.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==tab));
+  try{
+   if(view.k=='lib'){hd('Bibliothèque');body('<div class="pad sum">Ta bibliothèque est vide.<br>Ajoute une œuvre depuis Parcourir.</div>')}
+   else if(view.k=='src'){hd('Sources');const b=body(`<div class="row"><div class="tile">${H(initials(c.name))}</div><div><b>${H(c.name)}</b><small>${H(c.lang)} · ${H(c.base)}</small></div><span style="margin-left:auto;font-size:20px">⬇</span></div><div class="pad sum">Voilà comment la source apparaîtra dans l'onglet Sources avant son installation.</div>`)}
+   else if(view.k=='browse'){
+    hd('Parcourir',c.name);
+    const b=body('<div class="srch"><input id="pvq" placeholder="Rechercher…"><button id="pvs">OK</button></div><div id="pvl"><div class="ld">⏳ Chargement…</div></div>');
+    b.querySelector('#pvq').value=term;
+    const go=()=>{term=b.querySelector('#pvq').value.trim();draw()};
+    b.querySelector('#pvs').onclick=go;b.querySelector('#pvq').onkeydown=e=>{if(e.key=='Enter')go()};
+    const L=await loadList(c,term),l=b.querySelector('#pvl');
+    if(!L.length){l.innerHTML='<div class="err">Aucune œuvre reconnue'+(term?' pour « '+H(term)+' »':' sur l\'accueil')+'. Vérifie « Liens d\'œuvre contiennent » dans les réglages.</div>';return}
+    l.innerHTML=L.map((x,i)=>`<div class="row" data-i="${i}">${x.cover?`<img src="${H(x.cover)}" referrerpolicy="no-referrer" alt="">`:'<div class="tile" style="border-radius:0;height:62px">'+H(initials(x.name))+'</div>'}<div><b>${H(x.name)}</b></div></div>`).join('');
+    l.querySelectorAll('.row').forEach(r=>r.onclick=()=>{view={k:'detail',item:L[r.dataset.i]};draw()})}
+   else if(view.k=='detail'){
+    hd('Fiche',null,()=>{view={k:tab=='browse'?'browse':tab};draw()});
+    body('<div class="ld">⏳ Chargement de la fiche…</div>');
+    const n=view.nov||(view.nov=await loadNovel(c,view.item.path));
+    const b=body(`<div class="pad">${n.cover||view.item.cover?`<img class="cv" referrerpolicy="no-referrer" src="${H(n.cover||view.item.cover)}" alt="">`:''}<h3>${H(n.name)}</h3><div class="sum">${H(n.summary||'(pas de description)')}</div><div style="clear:both"></div></div><div class="pad" style="padding-bottom:2px"><b style="font:700 14px system-ui">${n.chapters.length} chapitre(s)</b></div>${n.chapters.length?n.chapters.slice(0,60).map((x,i)=>`<div class="ch" data-i="${i}">${H(x.name)}</div>`).join(''):'<div class="err">Aucun chapitre trouvé. Vérifie « Liens de chapitre contiennent ».</div>'}${n.chapters.length>60?'<div class="ch" style="color:#555">… '+(n.chapters.length-60)+' autres</div>':''}`);
+    b.querySelectorAll('.ch[data-i]').forEach(r=>r.onclick=()=>{view={k:'read',nov:n,i:+r.dataset.i,item:view.item};draw()})}
+   else if(view.k=='read'){
+    const ch=view.nov.chapters[view.i];
+    hd(ch.name.slice(0,28),null,()=>{view={k:'detail',item:view.item,nov:view.nov};draw()});
+    body('<div class="ld">⏳ Chargement du chapitre…</div>');
+    const r=await loadChapter(c,ch.path);
+    const has=j=>view.nov.chapters[j];
+    const b=body(`<div class="pad txt">${r.images?r.images.map(u=>`<img src="${H(u)}" referrerpolicy="no-referrer" alt="">`).join(''):r.paras.map(p=>'<p>'+H(p)+'</p>').join('')}</div><div class="nav"><button class="btn" id="pvp" ${has(view.i-1)?'':'disabled'}>« Précédent</button><button class="btn" id="pvn" ${has(view.i+1)?'':'disabled'}>Suivant »</button></div>`);
+    b.parentElement.scrollTop=0;
+    const mv=d=>()=>{view={...view,i:view.i+d};draw()};
+    b.querySelector('#pvp').onclick=mv(-1);b.querySelector('#pvn').onclick=mv(1)}
+  }catch(e){body('<div class="err">✘ '+H(e.message||String(e))+'<br><br>Corrige les réglages (« Réglages détectés ») puis « Régénérer et tester ».</div>')}}
+ frame();draw();dlg.showModal()}
+
+// ---------- bouton ajouté après chaque génération
+const orig=window.renderResult;
+window.renderResult=function(){
+ const r=orig.apply(this,arguments);
+ const row=document.querySelector('#cpb')?.parentElement;
+ if(row&&!document.getElementById('tsb')){
+  const b=document.createElement('button');b.className='b';b.id='tsb';b.textContent='📱 Tester sur liseuse';
+  b.onclick=open;row.insertBefore(b,document.getElementById('dlb').nextSibling)}
+ return r};
+})();
+
+</script>
+</body></html>
