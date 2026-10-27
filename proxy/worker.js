@@ -1,8 +1,11 @@
-// Sefirah Source Hub — Cloudflare Worker: site proxy + Workers AI.
-// Does not bypass CAPTCHA, Cloudflare challenges, authentication, or other access controls.
-// Configure Workers AI binding named AI. Optional vars: ALLOWED_ORIGIN, AI_MODEL, MAX_HTML_BYTES.
+// Sefirah Source Hub — Cloudflare Worker : proxy de sites + Workers AI + relais « recevoir une source » sur la liseuse.
+// Ne contourne ni CAPTCHA, ni challenge Cloudflare, ni authentification, ni autre contrôle d'accès.
+// Binding Workers AI nommé AI. Binding KV nommé RELAY (pour « Envoyer à la liseuse »).
+// Variables facultatives : ALLOWED_ORIGIN, AI_MODEL, MAX_HTML_BYTES.
 const DEFAULT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 const MAX_HTML_BYTES = 2_000_000;
+const RELAY_TTL = 600;          // secondes (KV exige >= 60)
+const RELAY_MAX = 300_000;      // taille max d'un .lua envoyé
 const PRIVATE_HOST = /(^localhost$|\.localhost$|\.local$|\.internal$|^127\.|^10\.|^192\.168\.|^169\.254\.|^172\.(1[6-9]|2\d|3[01])\.|^0\.|^::1$|^\[::1\]$|^fc[0-9a-f]{2}:|^fd[0-9a-f]{2}:|^fe80:)/i;
 
 function json(data, status, cors) {
@@ -18,11 +21,44 @@ function validTarget(raw) {
   if (u.username || u.password) return null;
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (!host || PRIVATE_HOST.test(host) || host.includes('%') || host === 'broadcast' || host === 'metadata.google.internal') return null;
-  // Only standard web ports; prevents access to arbitrary services.
   if (u.port && u.port !== '80' && u.port !== '443') return null;
   u.hash = '';
   return u;
 }
+
+// ---- Relais « recevoir une source » : le site dépose le fichier et reçoit un code à 4 chiffres ;
+// la liseuse saisit ce code pour récupérer le fichier (une seule fois).
+async function relay(req, env, u, cors) {
+  if (!env.RELAY) return json({ error: 'Relais non configuré : ajoute un binding KV nommé RELAY au Worker.' }, 501, cors);
+  if (u.pathname === '/relay/send') {
+    if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, cors);
+    let b;
+    try { b = await req.json(); } catch { return json({ error: 'JSON invalide' }, 400, cors); }
+    const id = String(b.id || ''), lua = typeof b.lua === 'string' ? b.lua : '';
+    if (!/^[A-Za-z0-9_-]{1,40}$/.test(id)) return json({ error: 'Identifiant de source invalide.' }, 400, cors);
+    if (!lua || lua.length > RELAY_MAX) return json({ error: 'Fichier vide ou trop gros (max ' + RELAY_MAX / 1000 + ' Ko).' }, 413, cors);
+    let code = null;
+    for (let i = 0; i < 10 && !code; i++) {
+      const c = String(crypto.getRandomValues(new Uint32Array(1))[0] % 10000).padStart(4, '0');
+      if (!(await env.RELAY.get('r:' + c))) code = c;
+    }
+    if (!code) return json({ error: 'Aucun code libre, réessaie dans un instant.' }, 503, cors);
+    await env.RELAY.put('r:' + code, JSON.stringify({ id, lua }), { expirationTtl: RELAY_TTL });
+    return json({ code }, 200, cors);
+  }
+  if (u.pathname === '/relay/fetch') {
+    if (req.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, cors);
+    const code = u.searchParams.get('code') || '';
+    if (!/^\d{4}$/.test(code)) return json({ error: 'code invalide' }, 400, cors);
+    const key = 'r:' + code;
+    const v = await env.RELAY.get(key, { cacheTtl: 30 });
+    if (!v) return new Response(null, { status: 204, headers: cors });
+    await env.RELAY.delete(key);   // remis une seule fois
+    return new Response(v, { status: 200, headers: { ...cors, 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' } });
+  }
+  return json({ error: 'not_found' }, 404, cors);
+}
+
 export default {
   async fetch(req, env) {
     const origin = req.headers.get('Origin') || '';
@@ -37,6 +73,8 @@ export default {
     if (allowed !== '*' && origin && origin !== allowed) return json({ error: 'origin_not_allowed' }, 403, cors);
 
     const u = new URL(req.url);
+    if (u.pathname.startsWith('/relay/')) return relay(req, env, u, cors);
+
     if (u.pathname === '/ai') {
       const hasAI = !!env.AI;
       if (req.method === 'GET') return json({ ai: hasAI }, 200, cors);
@@ -56,7 +94,7 @@ export default {
           max_tokens: 1600
         });
         let answer = result && (result.response ?? result.output_text ?? result.text);
-        if (answer && typeof answer === 'object') answer = JSON.stringify(answer); // le modèle renvoie parfois un objet JSON déjà analysé
+        if (answer && typeof answer === 'object') answer = JSON.stringify(answer);
         if (typeof answer !== 'string' || !answer.trim()) return json({ error: 'Réponse vide du modèle IA.' }, 502, cors);
         return json({ text: answer }, 200, cors);
       } catch (e) {
@@ -68,7 +106,6 @@ export default {
     const target = validTarget(u.searchParams.get('url') || '');
     if (!target) return json({ error: 'URL refusée : seuls les sites HTTP(S) publics sur les ports standards sont autorisés.' }, 400, cors);
     try {
-      // Do not follow redirects: a public URL must not redirect the proxy to a private host.
       const response = await fetch(target.href, {
         method: 'GET',
         redirect: 'manual',
