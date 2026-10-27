@@ -588,7 +588,7 @@ const imgCls=d=>{const m={};d.querySelectorAll('img').forEach(i=>{const c=cls1(i
 const HINTS=[
  [/Colle l'adresse du site|Adresse invalide/,"Colle l'adresse complète d'une page du site, par exemple https://exemple.com (copie-la depuis la barre d'adresse de ton navigateur)."],
  [/CORS|Accès bloqué par le navigateur|Failed to fetch|NetworkError|Load failed/,"Le Hub n'a pas pu joindre le site (ou son proxy intégré). Vérifie ta connexion, l'adresse du site, puis réessaie dans un moment. Si ça persiste, le Worker Cloudflare du Hub est peut-être hors service ou a atteint son quota gratuit du jour."],
- [/Site protégé|anti-bot/,"Ce site bloque les lecteurs automatiques (Cloudflare / CAPTCHA). Le Hub ne contourne pas ces protections, donc il n'y a rien à réparer ici : choisis un autre site, ou regarde dans l'onglet Catalogue si une source existe déjà pour ce site."],
+ [/Site protégé|anti-bot/,"Ce site bloque les lecteurs automatiques (Cloudflare / CAPTCHA). Le Hub ne contourne pas ces protections, donc il n'y a rien à réparer ici : choisis un autre site, ou regarde dans l'onglet Catalogue si une source existe déjà pour ce site. Astuce : tu peux quand même coller le code source d'une page dans la case « 🆘 Ça ne marche pas ? » plus bas, je m'en servirai pour trouver les réglages."],
  [/binding « AI » manquant|Workers AI n'est pas actif/,"L'IA n'est pas disponible sur le Worker du Hub (binding Workers AI nommé AI manquant, côté Cloudflare). Sans IA, le Hub marche quand même avec des réglages automatiques que tu peux corriger dans « Réglages détectés »."],
  [/Réponse vide du modèle IA/,"L'IA a renvoyé une réponse vide. Relance une 2e fois : l'IA est parfois capricieuse."],
  [/Réponse IA illisible|Erreur Workers AI|Erreur IA|IA indisponible|Correction IA impossible/,"L'IA n'a pas pu répondre (quota gratuit atteint, modèle indisponible ou réponse mal formée). Réessaie dans quelques minutes. En attendant, les réglages automatiques sont utilisés : corrige-les si besoin dans « Réglages détectés » puis « Régénérer et tester »."],
@@ -666,7 +666,9 @@ function findParas(o,d=0){if(!o||typeof o!='object'||d>3)return null;
 function discoverChapter(objs){for(const [k,o] of objs){const p=findParas(o);if(p)return{nkChap:k,nkPara:p.para,nkText:p.text,nkContent:''};
   const lf=Object.entries(o).find(([f,v])=>typeof v=='string'&&v.length>1500&&/<p|\n\n/.test(v));if(lf)return{nkChap:k,nkPara:'',nkText:'',nkContent:lf[0]}}return null}
 function discoverNovel(objs){const o=objs.find(([k,o])=>typeof o.title=='string'&&('description' in o||'synopsis' in o)&&(o.slug||o.coverImage||o.cover));return o?o[0]:null}
-function discoverList(nov,pref){if(pref&&Array.isArray(nov[pref]))return pref;return Object.keys(nov).find(f=>Array.isArray(nov[f])&&nov[f].length>=3&&nov[f].every(x=>x&&x.slug&&(x.title||x.name)))||null}
+function discoverList(nov,pref){if(pref&&Array.isArray(nov[pref]))return pref;
+ const ok=f=>Array.isArray(nov[f])&&nov[f].length>=3&&nov[f].every(x=>x&&x.slug&&(x.title||x.name));
+ return Object.keys(nov).find(f=>/chap|episode|volume/i.test(f)&&ok(f))||Object.keys(nov).find(f=>!/genre|tag|categor|author|label|theme/i.test(f)&&ok(f))||null}
 
 // tests réels (réseau) d'une configuration -> liste de [ok|w|e|s, message]
 async function runTests(c){
@@ -719,6 +721,11 @@ async function runTests(c){
      slugs.length?add('ok','Next.js : API des chapitres → '+slugs.length+' chapitres (total '+(j.total??'?')+')'):add('e','Next.js : l\'API des chapitres n\'a renvoyé aucun chapitre')}
     catch(e){add('e','Next.js : API des chapitres illisible ('+e.message+')')}}
    else if(nov){const lf=discoverList(nov,K.nkList);if(lf){K.nkList=lf;slugs=nov[lf].map(x=>x.slug);add('ok','Next.js : '+slugs.length+' chapitres dans le champ « '+lf+' » de la fiche')}}
+   if(!slugs.length&&!ax){const slug=npath.split('/').filter(Boolean).pop();
+    for(const g of ['/api/chapters/{slug}?skip={skip}&take=50&order=asc','/api/novels/{slug}/chapters','/api/novel/{slug}/chapters','/api/chapters?novel={slug}']){
+     try{const r=await getPage(base+g.replace('{slug}',slug).replace('{skip}','0'));if(r.status>=400)continue;const j=JSON.parse(r.text);
+      const a=j.chapters||j.data||j.items||(Array.isArray(j)?j:[]),s=a.map(x=>x&&x.slug).filter(Boolean);
+      if(s.length){slugs=s;K.apiChap=g;add('ok','Next.js : adresse API des chapitres trouvée toute seule ('+g+')');break}}catch{}}}
    if(!slugs.length&&!chHtml)add('e','Next.js : aucune liste de chapitres trouvée. Cherche l\'adresse API des chapitres dans DevTools › Network.');
    let html2=chHtml;
    if(!html2&&slugs.length){try{html2=(await getPage(base+npath+'/'+slugs[0])).text}catch(e){add('e','Next.js : chapitre illisible ('+e.message+')')}}
@@ -751,8 +758,11 @@ async function runTests(c){
  return R}
 
 // affichage du résultat : fichier .lua + tests + réglages modifiables
+function readAdv(){const g=id=>document.getElementById(id);if(!g('a_name'))return;const v=id=>g(id).value.trim();
+ CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1',next:v('a_next')=='1',nkNovel:v('a_nkn'),nkChap:v('a_nkc'),nkPara:v('a_nkp'),nkText:v('a_nkt'),nkContent:v('a_nkx'),apiChap:v('a_apic'),apiSearch:v('a_apis')}}
 function renderResult(tests,info,openAdv){
  const c=cfg(),g=genLua(c),bad=tests.filter(t=>t[0]=='e'),miss=[];
+ const fix=FIXMSG;FIXMSG=[];LASTINFO=info;
  if(!c.search)miss.push('search');
  if(!c.list)miss.push('list');
  if(!c.chap&&!c.next)miss.push('chap');
@@ -762,13 +772,15 @@ function renderResult(tests,info,openAdv){
   :bad.length?`⚠ Fichier généré, mais ${bad.length} test(s) en échec. Lis les « Comment réparer » ci-dessous.`
   :'✔ Fichier généré : tous les tests bloquants sont passés.';
  const why=info.ai?'Réglages établis par l\'IA.':'Réglages devinés sans IA (heuristiques)'+(info.aiWhy?' — '+H(info.aiWhy):'')+'.';
+ const fixHtml=fix.length?`<div class="card" style="border-color:var(--a)"><b>🩹 Voilà ce que j'ai compris de ton code</b><ul style="margin:6px 0">${fix.map(r=>`<li class="${r[0]}">${ic[r[0]]} ${H(r[1])}</li>`).join('')}</ul></div>`:'';
  const inp=(id,l,v,ph)=>`<label>${l}</label><input id="${id}" value="${H(v)}" placeholder="${H(ph||'')}">`;
  $('#cout').innerHTML=`<div class="card"><div class="sh">${ico(c.base,32)}<div><b>${H(c.name)}</b><br><small>${H(c.base.replace(/^https?:\/\//,''))}</small></div><button class="b s" id="icb" style="margin-left:auto">⬇ Icône</button></div><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
  ${miss.map(m=>`<span class="fx">🛠 Pour trouver ${H(MISS[m][0])} : ${H(MISS[m][1])}</span>`).join('')}
- <small>${why}</small>${info.aiWhy?fx(info.aiWhy):''}
- <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
+ <small>${why}</small>${info.aiWhy?fx(info.aiWhy):''}${fixHtml}
+ <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b" id="tsb">📱 Tester sur liseuse</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
  <div id="rcv"></div>
  <details class="help" open><summary>Détail des tests (${tests.length})</summary><ul>${tests.map(r=>`<li class="${r[0]}">${ic[r[0]]} ${H(r[1])}${r[0]=='ok'?'':fx(r[1],r[0]=='e')}</li>`).join('')}</ul></details>
+ ${helpHtml(k!='ok')}
  <details class="help" ${openAdv||miss.length?'open':''}><summary>Réglages détectés (avancé)</summary>
   <div class="row"><div>${inp('a_name','Nom affiché',c.name)}</div><div>${inp('a_lang','Langue',c.lang)}</div><div><label>Type</label><select id="a_type"><option value="novel" ${c.type=='novel'?'selected':''}>Roman</option><option value="manga" ${c.type=='manga'?'selected':''}>Manga</option></select></div></div>
   ${inp('a_search','Adresse d\'une recherche HTML (avec {q} et {page})',c.search,'https://exemple.com/search?q={q}')}
@@ -797,8 +809,11 @@ function renderResult(tests,info,openAdv){
  $('#cpb').onclick=e=>cp(g.code,e.target);
  $('#vwb').onclick=()=>viewCode(g.id+'.lua',g.code);
  $('#mtb').onclick=e=>cp(g.meta,e.target);
+ $('#tsb').onclick=()=>window.openPreview&&window.openPreview();
+ initHelp();
+ if(fix.length)$('#cout').scrollIntoView({behavior:'smooth'});
  $('#a_go').onclick=async e=>{const b=e.target,v=id=>$('#'+id).value.trim();b.disabled=true;b.textContent='Test en cours…';
-  CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1',next:v('a_next')=='1',nkNovel:v('a_nkn'),nkChap:v('a_nkc'),nkPara:v('a_nkp'),nkText:v('a_nkt'),nkContent:v('a_nkx'),apiChap:v('a_apic'),apiSearch:v('a_apis')};
+  readAdv();
   renderResult(await runTests(cfg()),info,true)}}
 
 // bouton principal
@@ -834,7 +849,8 @@ async function generate(){
   if(bad.length&&ai){say("Correction par l'IA…");
    try{applyCfg(await aiAsk(AISYS,JSON.stringify({...S,config:CFG,echecs:bad.map(x=>x[1])})));say('Nouveau test…');t=await runTests(cfg())}catch(e){aiWhy='Correction IA impossible : '+e.message}}
   o.innerHTML='';renderResult(t,{ai,aiWhy});
- }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p>${fx(e.message,true)}`}
+ }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p>${fx(e.message,true)}`;
+  try{const u=new URL($('#cu').value.trim());CFG.name=CFG.name||u.hostname.replace(/^www\./,'');renderResult([['e',e.message]],{ai:false,aiWhy:''})}catch{}}
  finally{btn.disabled=false}}
 // ---------- recevoir une source sur la liseuse : le site crée un code à 4 chiffres
 async function relayPublish(id,code,box){
@@ -843,6 +859,87 @@ async function relayPublish(id,code,box){
   const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Erreur '+r.status);
   box.innerHTML=`<div class="card" style="text-align:center"><div>📡 Code pour la liseuse</div><div style="font-size:42px;font-weight:700;letter-spacing:.2em;color:var(--a)">${H(j.code)}</div><small>Sur la liseuse : Sefirah › Sources › icône antenne, puis tape ce code.<br>Valable 10 minutes, utilisable une seule fois.</small></div>`}
  catch(e){box.innerHTML='<p class="w">⚠ Code pour la liseuse indisponible ('+H(e.message)+'). Tu peux quand même télécharger le fichier.</p>'}}
+
+// ---------- 🆘 aide : le débutant colle le code source d'une page, le Hub le lit à sa place
+const PASTE={};let FIXMSG=[],LASTINFO={ai:false};
+const HELPTXT={home:"Ouvre la page d'accueil du site (la première page, avec la liste des œuvres).",search:"Fais une recherche sur le site (ex. « love »), puis reste sur la page des résultats.",novel:"Ouvre la page d'une œuvre : celle qui montre le résumé et la liste des chapitres.",chapter:"Ouvre un chapitre pour le lire : la page avec le texte (roman) ou les images (manga)."};
+const helpHtml=open=>`<details class="help" id="helpbox" ${open?'open':''}><summary><b>🆘 Ça ne marche pas ? Colle le code d'une page et je corrige</b></summary>
+<div class="card"><p style="margin:0 0 6px;color:var(--t)">Pas besoin de comprendre le code : tu le copies, tu le colles ici, et je le lis à ta place pour retrouver les bons réglages.</p>
+<label>1. Quelle page veux-tu me montrer ?</label>
+<select id="h_type"><option value="home">La page d'accueil du site</option><option value="search">Une page de résultats de recherche</option><option value="novel">La page d'une œuvre (avec ses chapitres)</option><option value="chapter">Une page de lecture d'un chapitre</option></select>
+<span class="hint" id="h_guide"></span>
+<label>2. Copie le code de cette page</label>
+<ol style="margin:4px 0;padding-left:20px"><li>Sur la page du site, fais un clic droit › « Afficher le code source de la page » (ou touches Ctrl+U). Sur téléphone : écris <code>view-source:</code> devant l'adresse de la page.</li><li>Dans l'onglet qui s'ouvre : Ctrl+A (tout sélectionner) puis Ctrl+C (copier).</li><li>Reviens ici et colle dans la grande case ci-dessous (Ctrl+V).</li></ol>
+<div id="h_extra" style="display:none"><label>Le mot que tu as cherché</label><input id="h_word" placeholder="love"><label>L'adresse de la page de résultats (copie-la en haut du navigateur)</label><input id="h_url" placeholder="https://exemple.com/search?q=love"></div>
+<label>3. Colle le code ici</label><textarea id="h_src" placeholder="Colle ici le code de la page…"></textarea>
+<div class="row"><button class="b" id="h_go">🔍 Analyser ce code</button></div><div id="h_out"></div></div></details>`;
+const NKK=['nkNovel','nkChap','nkPara','nkText','nkContent','nkList'];
+function applySet(s){
+ if(s.type=='novel'||s.type=='manga')CFG.type=s.type;
+ ['list','chap'].forEach(k=>{if(typeof s[k]=='string'&&s[k].length>1&&s[k].length<80)CFG[k]=s[k]});
+ if(typeof s.search=='string'&&s.search.includes('{q}')&&/^https?:\/\//.test(s.search))CFG.search=s.search;
+ if(tok(s.cont))CFG.cont=s.cont;if(tok(s.img))CFG.img=s.img;
+ if(s.rev!==undefined)CFG.rev=!!s.rev;
+ if(s.next!==undefined)CFG.next=!!s.next;
+ NKK.forEach(k=>{if(typeof s[k]=='string'&&/^[\w$-]{0,60}$/.test(s[k]))CFG[k]=s[k]})}
+// lit le code collé et en déduit les réglages ; renvoie {set, R:[[ok|w|e, message]]}
+function analyzeSource(type,html,word,pageUrl){
+ const R=[],add=(k,m)=>R.push([k,m]),set={};
+ if(html.length<300){add('e',"Ce que tu as collé est trop court : il faut copier TOUT le code de la page (Ctrl+A puis Ctrl+C dans l'onglet du code source).");return{set,R,fatal:1}}
+ if(!/<(html|head|body|div|a)\b/i.test(html)){add('e',"Ça ne ressemble pas à du code de page web. Vérifie que tu as copié le « code source » (clic droit › Afficher le code source de la page), pas le texte affiché.");return{set,R,fatal:1}}
+ if(html.length<30000&&/just a moment|cf-challenge|attention required|captcha/i.test(html)){add('e',"Tu as copié la page de vérification anti-robot, pas la vraie page. Ouvre d'abord la vraie page dans ton navigateur, attends qu'elle soit entièrement affichée, puis refais « Afficher le code source ».");return{set,R,fatal:1}}
+ const d=dom(html);let org='';
+ try{org=new URL($('#cu').value.trim()).origin}catch{}
+ if(!org){const u=d.querySelector('meta[property="og:url"]')?.content||d.querySelector('link[rel=canonical]')?.href||pageUrl;try{org=new URL(u).origin}catch{}}
+ if(!org){add('e',"Je ne sais pas de quel site vient ce code. Écris l'adresse du site tout en haut (zone « Créer une source »).");return{set,R,fatal:1}}
+ if(/Ã©|Ã¨|Ã |â€™/.test(html))add('w',"Les accents semblent abîmés dans ce code (ancien encodage de texte) : ils pourront être cassés dans KOReader.");
+ const L=lnk(d,org),st=rscStream(html);
+ const top=paths=>{const seg={};paths.forEach(p=>{const s=p.split('/').filter(Boolean);if(s.length>=2){const k='/'+s[0]+'/';seg[k]=(seg[k]||0)+1}});return Object.entries(seg).sort((a,b)=>b[1]-a[1])[0]};
+ if(type=='home'||type=='search'){
+  const withImg=new Set();
+  d.querySelectorAll('a[href]').forEach(a=>{if(!a.querySelector('img'))return;try{const x=new URL(a.getAttribute('href'),org);if(x.origin==org)withImg.add(x.pathname)}catch{}});
+  let t=withImg.size>=3?top([...withImg]):null;if(!t)t=top(L.map(x=>x[0]));
+  if(t&&t[1]>=2){set.list=t[0];add('ok','Liens d\'œuvres : ils commencent par « '+t[0]+' » ('+t[1]+' liens trouvés'+(withImg.size>=3?', avec couverture':'')+')')}
+  else add('e',"Je ne reconnais aucun lien d'œuvre dans cette page. Es-tu sûr d'avoir copié la bonne page (accueil ou résultats) ?");
+  const f=d.querySelector('form[action*=search],form[role=search]');
+  if(f&&!word){const i=f.querySelector('input[name]');if(i){try{set.search=new URL(f.getAttribute('action')||'/',org).href+'?'+i.name+'={q}';add('ok','Formulaire de recherche trouvé : '+set.search)}catch{}}}
+  if(type=='search'){
+   if(word&&pageUrl){let u=pageUrl,hit=false;
+    for(const w of [word,encodeURIComponent(word),word.replace(/ /g,'+'),word.replace(/ /g,'-'),encodeURIComponent(word).replace(/%20/g,'+')]){const i=u.toLowerCase().indexOf(w.toLowerCase());if(w&&i>=0){u=u.slice(0,i)+'{q}'+u.slice(i+w.length);hit=true;break}}
+    if(hit){u=u.replace(/([?&](?:page|paged|p)=)\d+/i,'$1{page}').replace(/\/page\/\d+/,'/page/{page}');set.search=u;add('ok','Adresse de recherche trouvée : '+u)}
+    else add('w',"Je ne retrouve pas « "+word+" » dans l'adresse. Copie l'adresse exacte de la page de résultats, juste après avoir cherché ce mot.")}
+   else if(!set.search)add('w',"Pour trouver l'adresse de recherche, remplis aussi « Le mot que tu as cherché » et « L'adresse de la page de résultats ».")}}
+ else if(type=='novel'){
+  const t=d.querySelector('h1')?.textContent.trim();if(t)add('ok','Titre de l\'œuvre lu : « '+t.slice(0,50)+' »');else add('w',"Pas de titre en grand (<h1>) sur cette page : le titre pourra s'afficher comme l'adresse.");
+  const g=chapGuess(L);
+  if(g){set.chap=g.chap;set.rev=!!g.rev;add('ok','Liens de chapitres : ils contiennent « '+g.chap+' »');add('ok',g.rev?'Les chapitres sont listés du plus récent au plus ancien : je les remets dans l\'ordre.':'Les chapitres sont déjà dans l\'ordre.')}
+  else if(st.length>500){const objs=rscObjects(st),nk=discoverNovel(objs);
+   if(nk){const nov=objs.find(x=>x[0]==nk)[1],lf=discoverList(nov);set.next=true;set.nkNovel=nk;add('ok','Site de type Next.js : fiche reconnue (« '+nk+' »)');
+    if(lf){set.nkList=lf;add('ok','Liste des chapitres trouvée dans le champ « '+lf+' »')}
+    else add('w',"Les chapitres ne sont pas dans cette page : au prochain test, je chercherai toute seule l'adresse qui les donne.")}
+   else add('e',"Je ne reconnais ni liste de chapitres ni fiche d'œuvre dans ce code. Vérifie que c'est bien la page d'UNE œuvre.")}
+  else add('e',"Je ne vois aucun lien de chapitre dans ce code. Vérifie que c'est bien la page d'une œuvre avec sa liste de chapitres.")}
+ else if(type=='chapter'){
+  const cc=d?cands(d):[],im=imgCls(d),best=cc.find(x=>x.cls);
+  if(best){set.type='novel';set.cont=best.cls;set.next=false;add('ok','Texte du chapitre trouvé dans « '+best.cls+' » ('+best.p+' paragraphes, '+best.len+' caractères)');if(best.len<500)add('w',"Le texte trouvé est court : c'est peut-être seulement un morceau du chapitre.")}
+  else if(im[0]&&im[0][1]>=4){set.type='manga';set.img=im[0][0];add('ok','Chapitre en images (manga) : '+im[0][1]+' images'+(im[0][0]?' de classe « '+im[0][0]+' »':''))}
+  else if(st.length>500){const dc=discoverChapter(rscObjects(st));
+   if(dc){set.type='novel';set.next=true;Object.assign(set,dc);add('ok','Site de type Next.js : texte du chapitre trouvé dans « '+dc.nkChap+' »')}
+   else add('e',"Je ne trouve pas le texte de ce chapitre dans le code. Vérifie que tu as copié la page d'un chapitre ouvert (avec le texte à l'écran).")}
+  else add('e',"Je ne trouve ni texte ni images de chapitre dans ce code. Vérifie que tu as copié la page d'un chapitre ouvert.")}
+ return{set,R}}
+function initHelp(){
+ const b=$('#h_go');if(!b)return;const sel=$('#h_type');
+ const upd=()=>{$('#h_guide').textContent=HELPTXT[sel.value];$('#h_extra').style.display=sel.value=='search'?'block':'none'};
+ sel.onchange=upd;upd();
+ b.onclick=async()=>{
+  const html=$('#h_src').value,out=$('#h_out'),type=sel.value;
+  if(!html.trim()){out.innerHTML='<p class="w">Colle d\'abord le code de la page dans la grande case.</p>';return}
+  const {set,R,fatal}=analyzeSource(type,html,($('#h_word').value||'').trim(),($('#h_url').value||'').trim());
+  if(fatal){out.innerHTML='<ul>'+R.map(r=>`<li class="${r[0]}">✘ ${H(r[1])}</li>`).join('')+'</ul>';return}
+  PASTE[type]=html;applySet(set);FIXMSG=R;
+  b.disabled=true;b.textContent='Je reteste…';
+  try{renderResult(await runTests(cfg()),LASTINFO,true)}catch(e){b.disabled=false;b.textContent='🔍 Analyser ce code';out.innerHTML='<p class="e">✘ '+H(e.message)+'</p>'}}}
 $('#cai').onclick=generate;
 $('#cu').addEventListener('keydown',e=>{if(e.key=='Enter')generate()});
 show(TABS.some(t=>t[0]==location.hash.slice(1))?location.hash.slice(1):'creer');
@@ -884,6 +981,11 @@ let dlg=document.getElementById('pv');
 if(!dlg){dlg=document.createElement('dialog');dlg.id='pv';document.body.append(dlg)}
 
 const enc=encodeURIComponent;
+// ouvre une page ; si le site la refuse (anti-bot, erreur), utilise le code collé par l'utilisateur
+async function pg(url,type){let p=null;try{p=await getPage(url)}catch{}
+ if((!p||blocked(p)||p.status>=400)&&PASTE[type])return{status:200,text:PASTE[type]};
+ if(!p)throw new Error("Le Hub n'arrive pas à ouvrir cette page.");
+ return p}
 const unnext=u=>{const m=u.match(/\/_next\/image\?url=([^&]+)/);return m?decodeURIComponent(m[1]):u};
 const initials=n=>{const c=(n||'?').replace(/[^A-Z]/g,'');return c.length>=2?c.slice(0,2):(n||'?').slice(0,2).toUpperCase()};
 const normP=(h,b)=>{try{return new URL(h,b+'/').pathname.replace(/\/+$/,'').toLowerCase()}catch{return String(h)}};
@@ -906,8 +1008,8 @@ function listItems(doc,c){const out=[],idx={};
 
 async function loadList(c,term){
  const url=term?c.search.replace('{q}',enc(term)).replace('{page}','1'):c.base+'/';
- if(term&&!c.search)throw new Error('Pas d\'adresse de recherche dans les réglages.');
- const p=await getPage(url);
+ if(term&&!c.search)throw new Error("Je n'ai pas encore l'adresse de recherche de ce site.");
+ const p=await pg(url,term?'search':'home');
  if(blocked(p))throw new Error('Site protégé (anti-bot) : aperçu impossible.');
  if(p.status>=400)throw new Error('HTTP '+p.status);
  return listItems(dom(p.text),c)}
@@ -923,7 +1025,7 @@ function metaOf(doc,path){
  return{name,summary:sum.trim(),cover}}
 
 async function loadNovel(c,path){
- const url=new URL(path,c.base+'/').href,p=await getPage(url),doc=dom(p.text),m=metaOf(doc,path);
+ const url=new URL(path,c.base+'/').href,p=await pg(url,'novel'),doc=dom(p.text),m=metaOf(doc,path);
  let chs=[];
  if(c.next&&c.nkNovel){
   const st=rscStream(p.text),raw=balanced(st,c.nkNovel);let nov=null;try{nov=raw&&JSON.parse(raw)}catch{}
@@ -942,7 +1044,7 @@ async function loadNovel(c,path){
  return{...m,chapters:chs}}
 
 async function loadChapter(c,path){
- const url=new URL(path,c.base+'/').href,p=await getPage(url);
+ const url=new URL(path,c.base+'/').href,p=await pg(url,'chapter');
  if(blocked(p))throw new Error('Page de lecture protégée (anti-bot).');
  if(p.status>=400)throw new Error('HTTP '+p.status);
  const doc=dom(p.text);
@@ -966,7 +1068,7 @@ async function loadChapter(c,path){
 
 // ---------- interface
 function open(){
- const c=cfg();let tab='browse',term='',view={k:'browse'};
+ readAdv();const c=cfg();let tab='browse',term='',view={k:'browse'};
  const box=()=>dlg.querySelector('.scr');
  function frame(){
   dlg.innerHTML=`<div class="top"><b>📱 Aperçu sur liseuse</b><button class="b s" id="pvx">Fermer</button></div>
@@ -975,6 +1077,7 @@ function open(){
   <div class="tabs"><button data-t="lib">Bibliothèque</button><button data-t="browse">Parcourir</button><button data-t="src">Sources</button></div></div></div>`;
   dlg.querySelector('#pvx').onclick=()=>dlg.close();
   dlg.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;view={k:tab=='browse'?'browse':tab};draw()})}
+ const fixBtn=()=>{const f=dlg.querySelector('#pvfix');if(f)f.onclick=()=>{dlg.close();const h=document.getElementById('helpbox');if(h){h.open=true;h.scrollIntoView({behavior:'smooth'})}}};
  const hd=(t,sub,back)=>{const h=dlg.querySelector('#pvh');h.innerHTML=(back?'<button class="btn" id="pvback">←</button>':'')+'<span>'+H(t)+(sub?' <small>'+H(sub)+'</small>':'')+'</span>';
   if(back)h.querySelector('#pvback').onclick=back};
  const body=h=>{dlg.querySelector('#pvb').innerHTML=h;return dlg.querySelector('#pvb')};
@@ -991,14 +1094,15 @@ function open(){
     const go=()=>{term=b.querySelector('#pvq').value.trim();draw()};
     b.querySelector('#pvs').onclick=go;b.querySelector('#pvq').onkeydown=e=>{if(e.key=='Enter')go()};
     const L=await loadList(c,term),l=b.querySelector('#pvl');
-    if(!L.length){l.innerHTML='<div class="err">Aucune œuvre reconnue'+(term?' pour « '+H(term)+' »':' sur l\'accueil')+'. Vérifie « Liens d\'œuvre contiennent » dans les réglages.</div>';return}
+    if(!L.length){l.innerHTML='<div class="err">Aucune œuvre reconnue'+(term?' pour « '+H(term)+' »':' sur l\'accueil')+'.<br><br>Pas de panique : ferme l\'aperçu et colle le code de cette page dans « 🆘 Ça ne marche pas ? ».<br><br><button class="btn" id="pvfix">Fermer et corriger</button></div>';fixBtn();return}
     l.innerHTML=L.map((x,i)=>`<div class="row" data-i="${i}">${x.cover?`<img src="${H(x.cover)}" referrerpolicy="no-referrer" alt="">`:'<div class="tile" style="border-radius:0;height:62px">'+H(initials(x.name))+'</div>'}<div><b>${H(x.name)}</b></div></div>`).join('');
     l.querySelectorAll('.row').forEach(r=>r.onclick=()=>{view={k:'detail',item:L[r.dataset.i]};draw()})}
    else if(view.k=='detail'){
     hd('Fiche',null,()=>{view={k:tab=='browse'?'browse':tab};draw()});
     body('<div class="ld">⏳ Chargement de la fiche…</div>');
     const n=view.nov||(view.nov=await loadNovel(c,view.item.path));
-    const b=body(`<div class="pad">${n.cover||view.item.cover?`<img class="cv" referrerpolicy="no-referrer" src="${H(n.cover||view.item.cover)}" alt="">`:''}<h3>${H(n.name)}</h3><div class="sum">${H(n.summary||'(pas de description)')}</div><div style="clear:both"></div></div><div class="pad" style="padding-bottom:2px"><b style="font:700 14px system-ui">${n.chapters.length} chapitre(s)</b></div>${n.chapters.length?n.chapters.slice(0,60).map((x,i)=>`<div class="ch" data-i="${i}">${H(x.name)}</div>`).join(''):'<div class="err">Aucun chapitre trouvé. Vérifie « Liens de chapitre contiennent ».</div>'}${n.chapters.length>60?'<div class="ch" style="color:#555">… '+(n.chapters.length-60)+' autres</div>':''}`);
+    const b=body(`<div class="pad">${n.cover||view.item.cover?`<img class="cv" referrerpolicy="no-referrer" src="${H(n.cover||view.item.cover)}" alt="">`:''}<h3>${H(n.name)}</h3><div class="sum">${H(n.summary||'(pas de description)')}</div><div style="clear:both"></div></div><div class="pad" style="padding-bottom:2px"><b style="font:700 14px system-ui">${n.chapters.length} chapitre(s)</b></div>${n.chapters.length?n.chapters.slice(0,60).map((x,i)=>`<div class="ch" data-i="${i}">${H(x.name)}</div>`).join(''):'<div class="err">Aucun chapitre trouvé.<br><br>Ferme l\'aperçu et colle le code de la page d\'une œuvre dans « 🆘 Ça ne marche pas ? ».<br><br><button class="btn" id="pvfix">Fermer et corriger</button></div>'}${n.chapters.length>60?'<div class="ch" style="color:#555">… '+(n.chapters.length-60)+' autres</div>':''}`);
+    fixBtn();
     b.querySelectorAll('.ch[data-i]').forEach(r=>r.onclick=()=>{view={k:'read',nov:n,i:+r.dataset.i,item:view.item};draw()})}
    else if(view.k=='read'){
     const ch=view.nov.chapters[view.i];
@@ -1010,18 +1114,10 @@ function open(){
     b.parentElement.scrollTop=0;
     const mv=d=>()=>{view={...view,i:view.i+d};draw()};
     b.querySelector('#pvp').onclick=mv(-1);b.querySelector('#pvn').onclick=mv(1)}
-  }catch(e){body('<div class="err">✘ '+H(e.message||String(e))+'<br><br>Corrige les réglages (« Réglages détectés ») puis « Régénérer et tester ».</div>')}}
+  }catch(e){body('<div class="err">✘ '+H(e.message||String(e))+'<br><br>Pas de panique : ferme l\'aperçu, ouvre « 🆘 Ça ne marche pas ? » sous les tests et colle le code de la page concernée. Je corrigerai les réglages pour toi.<br><br><button class="btn" id="pvfix">Fermer et corriger</button></div>');fixBtn()}}
  frame();draw();dlg.showModal()}
 
-// ---------- bouton ajouté après chaque génération
-const orig=window.renderResult;
-window.renderResult=function(){
- const r=orig.apply(this,arguments);
- const row=document.querySelector('#cpb')?.parentElement;
- if(row&&!document.getElementById('tsb')){
-  const b=document.createElement('button');b.className='b';b.id='tsb';b.textContent='📱 Tester sur liseuse';
-  b.onclick=open;row.insertBefore(b,document.getElementById('dlb').nextSibling)}
- return r};
+window.openPreview=open;
 })();
 
 </script>
