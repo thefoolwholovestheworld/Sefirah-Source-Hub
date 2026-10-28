@@ -387,11 +387,23 @@ $('#cout').addEventListener('click',async e=>{
  if(b.dataset.rep!==undefined){const m=LASTT[i]&&LASTT[i][1];if(!m)return;
   const R=REPX[i]={msg:m,fixes:[],n:0};box.innerHTML='<span class="sp"></span> Je cherche la solution la plus simple…';
   if(/protégé|anti-bot|bloquée/.test(m)){R.fixes.push({titre:'Importer la page enregistrée (.mhtml ou code HTML)',type:'import'});R.cause="Le site bloque les lecteurs automatiques. Le Hub ne contourne pas cette protection : il lira à la place une copie de la page enregistrée depuis ton navigateur.";R.ai=true}
-  else{const q=quickFix(m);if(q)R.fixes.push({titre:q.titre,type:'regler',set:q.set})}
+  else{const q=quickFix(m);if(q)R.fixes.push({titre:q.titre,type:'regler',set:q.set});
+   else if(/Recherche non testée/.test(m)){const sa=await probeSearchApi(siteBase(),CFG.lang);if(sa)R.fixes.push({titre:'Utiliser la recherche par API du site ('+sa+')',type:'regler',set:{apiSearch:sa}})}}
   await showFix(i,box)}
  else if(b.dataset.rapply!==undefined){const R=REPX[i];await tryRepair(i,box,R.fixes[R.n].titre,()=>applySetFull(R.fixes[R.n].set))}
  else if(b.dataset.rnext!==undefined){REPX[i].n++;await showFix(i,box)}
  else if(b.dataset.rask!==undefined)await askRepair(i,box)});
+// ---------- recherche par API (sites Next.js : pas de page de résultats HTML)
+async function probeSearchApi(org,lang){
+ const ex=async(g,q)=>{try{const p=await getPage(org+g.replace('{q}',encodeURIComponent(q)));if(blocked(p)||p.status>=400)return null;
+   const j=JSON.parse(p.text),a=Array.isArray(j)?j:(j&&(j.novels||j.results||j.items));
+   return Array.isArray(a)?a.filter(x=>x&&typeof x=='object'&&x.slug&&(x.title||x.name)).map(x=>x.slug):null}catch{return null}};
+ const q=lang=='fr'?'amour':'love';
+ for(const g of['/api/search/autocomplete?q={q}','/api/search?q={q}','/api/novels?search={q}','/api/novels?q={q}','/api/search?query={q}','/api/novels/search?q={q}']){
+  const a=await ex(g,q);if(!a||!a.length)continue;
+  const b=await ex(g,'zzqxjvk');   // une vraie recherche renvoie autre chose (ou rien) pour un mot absurde
+  if(!b||!b.length||b.join()!=a.join())return g}
+ return ''}
 // ---------- créer : une adresse -> IA -> .lua
 const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:''});
 let CFG=NEWCFG();
@@ -1257,7 +1269,7 @@ async function runTests(c){
    try{const j=JSON.parse(q.text),a=(Array.isArray(j)?j:[]).filter(x=>x&&x.url&&(!list||x.url.includes(list)));
     a.length?(add('ok','Recherche REST WordPress : '+a.length+' œuvre(s)'),first=a[0].url):add('w','Recherche REST : aucun résultat dans « '+list+' » (l\'API /wp-json/ est peut-être fermée)')}
    catch{add('w','Recherche REST : réponse illisible')}}
-  else if(!c.search)add('s','Recherche non testée (URL absente)');
+  else if(!c.search)add('s',c.apiSearch?'Recherche HTML non utilisée : la recherche passe par une API':'Recherche non testée (URL absente)');
   else{
    const q=await gd('search',c.search.replace('{q}',encodeURIComponent(c.lang=='fr'?'amour':'love')).replace('{page}','1'));
    if(blocked(q))add('e','Recherche bloquée (anti-bot)');
@@ -1268,6 +1280,8 @@ async function runTests(c){
      first=l[0].getAttribute('href')}
     else add('w','Recherche : 0 résultat (page vide ?)')}}
   await testFilters();
+  if(c.apiSearch){try{const r=await getPage(base+c.apiSearch.replace('{q}',encodeURIComponent(c.lang=='fr'?'amour':'love'))),j=JSON.parse(r.text),a=Array.isArray(j)?j:(j.novels||j.results||j.items||[]);
+   a.length?add('ok','Recherche par API : '+a.length+' résultat(s) ('+c.apiSearch+')'):add('w','Recherche par API : 0 résultat')}catch{add('w','Recherche par API illisible')}}
   if(!first&&h[0])first=h[0].getAttribute('href');
   if(!first){add('s','Fiche, chapitres et lecture non testés : aucune œuvre trouvée');return R}
   const f=await gd('fiche',abs(first)),fd=dom(f.text),t=fd.querySelector('h1')?.textContent.trim();
@@ -1361,7 +1375,7 @@ function readAdv(){const g=id=>document.getElementById(id);if(!g('a_name'))retur
 function renderResult(tests,info,openAdv){LASTT=tests;
  const c=cfg(),g=genLua(c),bad=tests.filter(t=>t[0]=='e'),miss=[];
  const lp=info.loop;info={...info,loop:null};const fix=FIXMSG;FIXMSG=[];LASTINFO=info;
- if(!c.search)miss.push('search');
+ if(!c.search&&!(c.apiSearch&&c.next))miss.push('search');
  if(!c.list)miss.push('list');
  if(!c.chap&&!c.next)miss.push('chap');
  if(c.type=='novel'&&!c.cont&&!c.next)miss.push('cont');
@@ -1477,6 +1491,7 @@ async function generate(){
   {const GS=await gatherSamples(org);
    if(GS.S.fiche.length||GS.S.chap.length||GS.errs.length){say("Comparaison des pages d'exemple…");const L=learn(GS,org);FIXMSG=L.R;learned=L.set;S.exemples=L.digest;applySet(L.set)}}
   if(ai){say("Analyse par l'IA…");try{applyCfg(await aiAsk(AISYS,JSON.stringify(S)))}catch(e){ai=false;aiWhy='IA indisponible : '+e.message}}
+  if(!CFG.search&&eng!='madara'&&eng!='wpjson'){say("Recherche d'une API de recherche…");const sa=await probeSearchApi(org,CFG.lang);if(sa){CFG.apiSearch=sa;if(eng=='next'||apis.some(a=>a.id=='nextf'||a.id=='nextdata'))CFG.next=true}}
   if(eng)applyEngine(eng);if(learned)applySet(learned);
   say('Génération et test automatique…');
   let t=await runTests(cfg()),loop=null;
@@ -1590,6 +1605,7 @@ function applySet(s){
  if(typeof s.search=='string'&&s.search.includes('{q}')&&/^https?:\/\//.test(s.search))CFG.search=s.search;
  if(tok(s.cont))CFG.cont=s.cont;if(tok(s.img))CFG.img=s.img;
  if(s.rev!==undefined)CFG.rev=!!s.rev;
+ if(typeof s.apiSearch=='string'&&/^\/[^\s"]*\{q\}/.test(s.apiSearch)){CFG.apiSearch=s.apiSearch;if(s.next===undefined)CFG.next=true}
  if(s.next!==undefined)CFG.next=!!s.next;
  if(Array.isArray(s.filters))CFG.filters=mergeF(CFG.filters,s.filters);
  if(typeof s.browse=='string'&&s.browse)CFG.browse=s.browse;
