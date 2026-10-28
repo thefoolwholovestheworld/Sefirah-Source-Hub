@@ -210,6 +210,38 @@ function ext:searchNovels(term, page)
     return { novels = out }
 end
 `}
+// ---------- 5. détection des API cachées : avant de lire le HTML
+async function probeApis(org,html,d){
+ const out=[],add=(id,name,url,note)=>out.push({id,name,url,note});
+ const ok=p=>p&&!blocked(p)&&p.status<400;
+ const J=async u=>{try{const p=await getPage(u);if(!ok(p))return null;return{p,j:JSON.parse(p.text)}}catch{return null}};
+ const X=async u=>{try{const p=await getPage(u);return ok(p)?p:null}catch{return null}};
+ const ld=[];
+ d.querySelectorAll('script[type="application/ld+json"]').forEach(s=>{try{const j=JSON.parse(s.textContent);(Array.isArray(j)?j:j['@graph']||[j]).forEach(x=>x&&x['@type']&&ld.push(String([].concat(x['@type'])[0]).slice(0,30)))}catch{}});
+ if(ld.length)add('jsonld','JSON-LD','',[...new Set(ld)].join(', ')+' : métadonnées structurées (titre, auteur, image) lisibles sans sélecteur CSS');
+ if(/__NEXT_DATA__/.test(html))add('nextdata','Données JSON embarquées (__NEXT_DATA__)','','tout le contenu de la page est dans un JSON : le Mode Next.js peut le lire');
+ else if(/self\.__next_f/.test(html))add('nextf','Flux Next.js (self.__next_f)','','données JSON dans la page : le Mode Next.js les lit');
+ const feeds=[...d.querySelectorAll('link[rel~=alternate][type*=rss],link[rel~=alternate][type*=atom]')].map(l=>{try{return new URL(l.getAttribute('href'),org+'/').href}catch{return''}}).filter(u=>u&&u.startsWith(org));
+ feeds.push(org+'/feed/');
+ const T=[];
+ T.push((async()=>{for(const u of [...new Set(feeds)].slice(0,3)){const p=await X(u);if(p&&/<(rss|feed)\b/i.test(p.text.slice(0,2000))){const n=(p.text.match(/<(item|entry)\b/g)||[]).length;add('rss','Flux RSS / Atom',u,n+' entrée(s) : dernières sorties, stable et léger');return}}})());
+ T.push((async()=>{const r=await J(org+'/wp-json/');if(!r||!r.j||!Array.isArray(r.j.namespaces))return;
+  const ns=r.j.namespaces,rt=Object.keys(r.j.routes||{});
+  add('wpjson','API REST WordPress',org+'/wp-json/','espaces : '+ns.slice(0,5).join(', ')+(ns.length>5?'…':'')+(rt.includes('/wp/v2/search')?' — recherche JSON disponible':'')+(rt.some(x=>/wp-manga|madara/i.test(x))?' — routes Madara présentes':''))})());
+ T.push((async()=>{let sm=[];const rb=await X(org+'/robots.txt');
+  if(rb)sm=(rb.text.match(/^sitemap:\s*(\S+)/gim)||[]).map(x=>x.replace(/^sitemap:\s*/i,''));
+  sm=sm.filter(u=>u.startsWith(org)).concat([org+'/sitemap.xml',org+'/wp-sitemap.xml',org+'/sitemap_index.xml']);
+  for(const u of [...new Set(sm)].slice(0,4)){const p=await X(u);if(!p||!/<(urlset|sitemapindex)\b/i.test(p.text.slice(0,2000)))continue;
+   const locs=(p.text.match(/<loc>\s*([^<\s]+)\s*<\/loc>/g)||[]).map(x=>x.replace(/<\/?loc>|\s/g,'')),idx=/<sitemapindex/i.test(p.text);
+   const pats=idx?[]:patterns(locs.map(l=>{try{return[new URL(l).pathname]}catch{return['/']}})).slice(0,3).map(x=>x.modele+' ×'+x.nb);
+   add('sitemap','Sitemap',u,(idx?locs.length+' sous-sitemap(s)':locs.length+' adresse(s)')+(pats.length?' — modèles : '+pats.join(' ; '):'')+' : liste complète des œuvres / chapitres');return}})());
+ T.push((async()=>{for(const g of['/api/novels','/api/manga','/api/series','/api/search?q=love','/api/v1/novels']){const r=await J(org+g);
+  if(r&&r.j&&typeof r.j=='object'){const a=Array.isArray(r.j)?r.j:(r.j.data||r.j.results||r.j.items||r.j.novels||null);
+   add('api','API JSON possible',org+g,'réponse JSON'+(Array.isArray(a)?' ('+a.length+' élément(s))':'')+' : à brancher via « Adresse API » (Mode Next.js)');return}}})());
+ await Promise.all(T);
+ const ord=['wpjson','api','nextdata','nextf','jsonld','rss','sitemap'];
+ return out.sort((a,b)=>ord.indexOf(a.id)-ord.indexOf(b.id))}
+const apisHtml=a=>a===undefined?'':`<div class="card" style="border-color:var(--a)"><b>🕵 Sources de données trouvées avant le HTML</b>${a.length?`<ul style="margin:6px 0">${a.map(x=>`<li class="ok">✔ <b>${H(x.name)}</b>${x.url?' <small>'+H(x.url)+'</small>':''}<br><small>${H(x.note)}</small></li>`).join('')}</ul>`:'<p style="margin:6px 0"><small>Aucune API ni flux détecté : le HTML sera lu.</small></p>'}</div>`;
 // ---------- créer : une adresse -> IA -> .lua
 const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:''});
 let CFG=NEWCFG();
@@ -1193,7 +1225,7 @@ function renderResult(tests,info,openAdv){
  const bwhy=chkBrowse(CFG.browse,c.base).why;
  $('#cout').innerHTML=`<div class="card"><div class="sh">${ico(c.base,32)}<div><b>${H(c.name)}</b><br><small>${H(c.base.replace(/^https?:\/\//,''))}</small></div><button class="b s" id="icb" style="margin-left:auto">⬇ Icône</button></div><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
  ${miss.map(m=>`<span class="fx">🛠 Pour trouver ${H(MISS[m][0])} : ${H(MISS[m][1])}</span>`).join('')}
- <small>${why}</small>${c.engine&&ENGINES[c.engine]?`<p style="margin:6px 0">⚙ Moteur détecté : <b>${H(ENGINES[c.engine].label)}</b> — modèle éprouvé appliqué.</p>`:''}${info.aiWhy?fx(info.aiWhy):''}${fixHtml}${loopHtml(lp)}${bad.length&&info.ai?'<div class="row"><button class="b s" id="lpb">🔁 Relancer la correction automatique</button></div><div id="lpm"></div>':''}${propHtml()}
+ <small>${why}</small>${c.engine&&ENGINES[c.engine]?`<p style="margin:6px 0">⚙ Moteur détecté : <b>${H(ENGINES[c.engine].label)}</b> — modèle éprouvé appliqué.</p>`:''}${info.aiWhy?fx(info.aiWhy):''}${apisHtml(info.apis)}${fixHtml}${loopHtml(lp)}${bad.length&&info.ai?'<div class="row"><button class="b s" id="lpb">🔁 Relancer la correction automatique</button></div><div id="lpm"></div>':''}${propHtml()}
  <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b" id="tsb">📱 Tester sur liseuse</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
  <div id="rcv"></div>
  <details class="help" open><summary>Détail des tests (${tests.length})</summary><ul>${tests.map(r=>`<li class="${r[0]}">${ic[r[0]]} ${H(r[1])}${r[0]=='ok'?'':fx(r[1],r[0]=='e')}</li>`).join('')}</ul></details>
@@ -1273,11 +1305,12 @@ async function generate(){
   const org=new URL(u).origin;
   let ai=await aiOn(),aiWhy=!ai?'Workers AI n\'est pas actif sur le proxy (binding « AI » manquant)':'';
   say("Lecture de la page d'accueil…");
-  const {p:hp,d:hd}=await analyzeHome(u);const eng=detectEngine(hp.text);
+  const {p:hp,d:hd}=await analyzeHome(u);say("Recherche d'API cachées…");let apis=[];try{apis=await probeApis(org,hp.text,hd)}catch{}
+  const eng=detectEngine(hp.text)||(apis.some(a=>a.id=='wpjson')?'wpjson':'');
   const hl=lnk(hd,org),lp0=CFG.list;
   // filtres vus sur l'accueil (selects, cases, liens répétés) : proposés à l'utilisateur, jamais ajoutés sans son choix (hors IA)
   try{DET=detectFilters(hd,org,u);PROP={list:DET.list.slice(),browse:DET.browse}}catch{}
-  const S={site:org,accueil:{formulaires:[...hd.querySelectorAll('form')].slice(0,3).map(f=>f.outerHTML.replace(/\s+/g,' ').slice(0,500)),liens:hl.slice(0,30),filtres:DET.list.map(f=>({key:f.key,label:f.label,multi:f.multi,nb:f.options.length,choix:f.options.slice(0,15).map(x=>x.label)})),adresseListeVue:DET.browse}};
+  const S={site:org,apis:apis.map(a=>({type:a.id,url:a.url,note:a.note})),accueil:{formulaires:[...hd.querySelectorAll('form')].slice(0,3).map(f=>f.outerHTML.replace(/\s+/g,' ').slice(0,500)),liens:hl.slice(0,30),filtres:DET.list.map(f=>({key:f.key,label:f.label,multi:f.multi,nb:f.options.length,choix:f.options.slice(0,15).map(x=>x.label)})),adresseListeVue:DET.browse}};
   const w=hl.find(([p])=>lp0&&p.includes(lp0)&&p.split('/').filter(Boolean).length>=2);
   if(w){try{
    say("Lecture d'une fiche œuvre…");
@@ -1294,7 +1327,7 @@ async function generate(){
   say('Génération et test automatique…');
   let t=await runTests(cfg()),loop=null;
   if(ai&&t.some(x=>x[0]=='e')){const r=await fixLoop(t,say);t=r.t;loop=r.hist;if(r.aiWhy)aiWhy=r.aiWhy}
-  o.innerHTML='';renderResult(t,{ai,aiWhy,loop});
+  o.innerHTML='';renderResult(t,{ai,aiWhy,loop,apis});
  }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p>${fx(e.message,true)}`;
   try{const u=new URL($('#cu').value.trim());CFG.name=CFG.name||u.hostname.replace(/^www\./,'');renderResult([['e',e.message]],{ai:false,aiWhy:''})}catch{}}
  finally{btn.disabled=false}}
