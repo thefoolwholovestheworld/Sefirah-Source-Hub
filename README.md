@@ -64,22 +64,6 @@ proxy/worker.js        Cloudflare Worker (page proxy, AI endpoint, e-reader rela
 
 **Locally:** serve the folder with a static server, for example `python -m http.server`, and open it in your browser. Opening `index.html` straight from disk will not load the catalogue.
 
-## Deploy your own Worker
-
-Many sites block requests coming from a browser (CORS) or sit behind anti-bot protection, so the Hub uses a small Cloudflare Worker for three things:
-
-| Route | Purpose |
-|---|---|
-| `?url=` | Fetch a page on behalf of the browser |
-| `/ai` | AI analysis and auto-repair |
-| `/relay/send` | Wireless relay to the e-reader |
-
-To use your own, deploy `proxy/worker.js` to Cloudflare Workers, then set the `PROXY` constant near the top of the script in `index.html` to your Worker URL. In the plugin, the relay address can be changed with the `relay_url` setting, and the catalogue address with `hub_url`.
-
-> **Lock your Worker down before making it public.** Allow only the origins and domains you need, rate-limit every route and cap AI usage. An open proxy or AI endpoint can be abused by anyone who finds its address.
-
----
-
 ## Disclaimer
 
 Sefirah Source Hub **does not host, store or distribute copyrighted content.** It only generates code that reads publicly available web pages.
