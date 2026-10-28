@@ -54,13 +54,12 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 <small id="cn"></small><div class="grid" id="cg"></div></section>
 
 
-<section id="moteurs"><div class="card"><h2 style="margin:0 0 4px">Moteurs prêts à l'emploi</h2><p style="margin:0;color:var(--m)">Le Hub reconnaît le moteur d'un site par sa signature et remplit un modèle éprouvé au lieu de deviner.</p></div><div class="grid" id="eg"></div></section>
 </main>
 <dialog id="dlg"><div class="row"><b id="dt"></b><button class="b s" onclick="dlg.close()">Fermer</button></div><pre id="dc"></pre></dialog>
 <script>
 const $=s=>document.querySelector(s),H=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-const TABS=[['creer','Créer'],['catalogue','Catalogue'],['moteurs','Moteurs']];
+const TABS=[['creer','Créer'],['catalogue','Catalogue']];
 const nav=$('#nav');TABS.forEach(([id,l])=>{const b=document.createElement('button');b.textContent=l;b.onclick=()=>show(id);b.dataset.id=id;nav.append(b)});
 function show(id){document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==id));nav.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.id==id));location.hash=id}
 const LS={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{alert('Stockage local indisponible')}}};
@@ -110,7 +109,6 @@ function applyEngine(e){
   if(org)CFG.search=org+'/?s={q}&post_type=wp-manga';
   CFG.chap='/chapter-';CFG.cont='reading-content';CFG.img='wp-manga-chapter-img'}
  else if(e=='wpjson'){if(org)CFG.search=org+'/wp-json/wp/v2/search?search={q}&per_page=20&page={page}'}}
-$('#eg').innerHTML=Object.values(ENGINES).map(x=>`<div class="card"><b>${H(x.label)}</b><br><small>${H(x.desc)}</small></div>`).join('');
 // Lua du moteur Madara (ajouté APRÈS le code générique : redéfinit liste, recherche, fiche, chapitres)
 function madaraLua(c,fx,man){return `
 -- ===== MOTEUR MADARA (WordPress) : modèle éprouvé =====
