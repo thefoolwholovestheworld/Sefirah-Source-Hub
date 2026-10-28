@@ -36,6 +36,15 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 <div class="card"><h2 style="margin:0 0 4px">Créer une source à partir d'une adresse</h2>
 <p style="margin:0 0 8px;color:var(--m)">Colle l'adresse du site : l'IA lit l'accueil, une fiche et un chapitre, devine les réglages, génère le fichier <code>.lua</code> et le teste.</p>
 <div class="row"><input id="cu" type="url" placeholder="https://exemple.com" aria-label="Adresse du site" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="b" id="cai">✨ Générer le .lua</button></div>
+<details class="help" id="smp"><summary><b>📄 Plusieurs pages d'exemple (plus fiable) / importer un .mhtml</b></summary>
+<span class="hint">Colle 1 à 3 fiches et 1 à 3 chapitres : le Hub compare les pages et garde ce qui revient à chaque fois (préfixe des œuvres, des chapitres, classe du texte ou des images, ordre).</span>
+<label>Fiches d'œuvres (une adresse par ligne)</label><textarea id="cf" style="min-height:64px" placeholder="https://exemple.com/novel/une-oeuvre&#10;https://exemple.com/novel/une-autre"></textarea>
+<label>Chapitres (une adresse par ligne)</label><textarea id="cc" style="min-height:64px" placeholder="https://exemple.com/novel/une-oeuvre/chapter-1&#10;https://exemple.com/novel/une-autre/chapter-5"></textarea>
+<p style="margin:10px 0 2px"><b>Site bloqué par Cloudflare ?</b> Ouvre la page dans ton navigateur puis enregistre-la (Ctrl+S › « Page Web, en un seul fichier » = .mhtml), ou copie son code source. Le Hub la lira à la place du site (accueil, fiche ou chapitre).</p>
+<div class="row"><input type="file" id="imf" multiple accept=".mhtml,.mht,.html,.htm"></div>
+<label>Ou colle le code HTML d'une page</label><textarea id="imt" placeholder="Colle ici le code source…"></textarea>
+<div class="row"><input id="imu" placeholder="Adresse de cette page (facultatif)"><button class="b s" type="button" id="ima">Ajouter ce code</button></div>
+<div id="iml"></div></details>
 <div id="cmsg"></div></div>
 <div id="cout"></div>
 
@@ -60,7 +69,7 @@ function dl(name,text){const a=document.createElement('a');a.href=URL.createObje
 function viewCode(t,c){$('#dt').textContent=t;$('#dc').textContent=c;dlg.showModal()}
 // ---------- réseau
 const PROXY='https://sefirah-source-hub.ayman-mr1.workers.dev';
-async function getPage(url){const px=PROXY;let err;
+async function getPage(url){const px=PROXY;let err;const im=IMP[nk(url)];if(im!=null)return{status:200,text:im};
  try{const r=await fetch(url);return {status:r.status,text:await r.text()}}catch(e){err=e}
  const r=await fetch(px+'?url='+encodeURIComponent(url));return {status:r.status,text:await r.text()}}
 const blocked=p=>(p.status==403||p.status==503||p.status==429)&&/cloudflare|just a moment|captcha|attention required/i.test(p.text);
@@ -242,6 +251,80 @@ async function probeApis(org,html,d){
  const ord=['wpjson','api','nextdata','nextf','jsonld','rss','sitemap'];
  return out.sort((a,b)=>ord.indexOf(a.id)-ord.indexOf(b.id))}
 const apisHtml=a=>a===undefined?'':`<div class="card" style="border-color:var(--a)"><b>🕵 Sources de données trouvées avant le HTML</b>${a.length?`<ul style="margin:6px 0">${a.map(x=>`<li class="ok">✔ <b>${H(x.name)}</b>${x.url?' <small>'+H(x.url)+'</small>':''}<br><small>${H(x.note)}</small></li>`).join('')}</ul>`:'<p style="margin:6px 0"><small>Aucune API ni flux détecté : le HTML sera lu.</small></p>'}</div>`;
+// ---------- 6. plusieurs pages d'exemple + import .mhtml / HTML collé
+const IMP={},IMPL=[],nk=u=>String(u).replace(/#.*$/,'').replace(/\/+$/,'');
+function parseMhtml(txt){
+ const hm=txt.match(/^[\s\S]*?\r?\n\r?\n/),head=hm?hm[0]:'',bm=head.match(/boundary="?([^";\r\n]+)"?/i);
+ if(!bm)return null;
+ const snap=(head.match(/snapshot-content-location:\s*(\S+)/i)||[])[1]||'';
+ for(const part of txt.split('--'+bm[1])){
+  const i=part.search(/\r?\n\r?\n/);if(i<0)continue;
+  const h=part.slice(0,i),b=part.slice(i).replace(/^\r?\n\r?\n/,'');
+  if(!/content-type:\s*text\/html/i.test(h))continue;
+  const enc=((h.match(/content-transfer-encoding:\s*(\S+)/i)||[])[1]||'').toLowerCase(),cs=(h.match(/charset="?([\w-]+)/i)||[])[1]||'utf-8',loc=(h.match(/content-location:\s*(\S+)/i)||[])[1]||snap;
+  let bytes=null,html=b;
+  if(enc=='base64'){try{bytes=Uint8Array.from(atob(b.replace(/\s+/g,'')),c=>c.charCodeAt(0))}catch{}}
+  else if(enc=='quoted-printable')bytes=Uint8Array.from(b.replace(/=\r?\n/g,'').replace(/=([0-9A-F]{2})/gi,(m,x)=>String.fromCharCode(parseInt(x,16))),c=>c.charCodeAt(0)&255);
+  if(bytes){try{html=new TextDecoder(cs).decode(bytes)}catch{html=new TextDecoder().decode(bytes)}}
+  return{html,url:loc}}
+ return null}
+function guessKind(html,url){const d=dom(html);let o='';try{o=new URL(url).origin}catch{}o=o||siteBase()||'https://x.invalid';
+ const cc=cands(d),im=imgCls(d);
+ if(cc.some(x=>x.p>=8)||(im[0]&&im[0][1]>=6&&d.querySelectorAll('a[href] img').length<im[0][1]/2))return'chap';
+ return chapGuess(lnk(d,o))?'fiche':'home'}
+function renderImp(){$('#iml').innerHTML=IMPL.map((x,i)=>`<div class="row"><select data-i="${i}" style="flex:0 0 130px">${[['home','Accueil'],['fiche','Fiche'],['chap','Chapitre']].map(([k,l])=>`<option value="${k}" ${x.kind==k?'selected':''}>${l}</option>`).join('')}</select><small style="flex:1 1 200px;word-break:break-all">${H(x.url||x.name)} · ${Math.round(x.html.length/1024)} Ko</small><button class="b s" type="button" data-x="${i}">✖</button></div>`).join('')}
+function addImp(html,url,name){const d=dom(html);
+ url=url||d.querySelector('meta[property="og:url"]')?.content||d.querySelector('link[rel=canonical]')?.href||'';
+ try{url=new URL(url).href}catch{url=''}
+ IMPL.push({html,url,name,kind:guessKind(html,url)});if(url)IMP[nk(url)]=html;
+ if(!$('#cu').value.trim()&&url){try{$('#cu').value=new URL(url).origin}catch{}}
+ renderImp();$('#smp').open=true}
+$('#iml').onchange=e=>{const s=e.target.closest('select');if(s)IMPL[+s.dataset.i].kind=s.value};
+$('#iml').onclick=e=>{const b=e.target.closest('button[data-x]');if(b){const x=IMPL.splice(+b.dataset.x,1)[0];if(x.url)delete IMP[nk(x.url)];renderImp()}};
+$('#imf').onchange=async e=>{for(const f of e.target.files){try{const t=await f.text();let h=t,u='';
+  if(/\.mht(ml)?$/i.test(f.name)||/^(mime-version|content-type:\s*multipart)/im.test(t.slice(0,800))){const m=parseMhtml(t);if(m){h=m.html;u=m.url}}
+  if(h.length<300)throw new Error('fichier trop court');addImp(h,u,f.name)}catch(er){alert('Import impossible ('+f.name+') : '+er.message)}}
+ e.target.value=''};
+$('#ima').onclick=()=>{const h=$('#imt').value;if(h.trim().length<300){alert('Colle le code complet de la page.');return}addImp(h,$('#imu').value.trim(),'code collé');$('#imt').value='';$('#imu').value=''};
+// récupère les pages d'exemple : adresses saisies (ou importées) + pages importées
+async function gatherSamples(org){
+ const S={fiche:[],chap:[],home:[]},errs=[];
+ const lines=id=>String($(id).value||'').split(/\r?\n/).map(x=>x.trim()).filter(Boolean).map(x=>/^https?:\/\//i.test(x)?x:'https://'+x).slice(0,3);
+ for(const [k,id] of [['fiche','#cf'],['chap','#cc']])for(const u of lines(id)){
+  try{const p=await getPage(u);
+   if(blocked(p))errs.push('Page bloquée (anti-bot) : '+u+' — importe-la en .mhtml ou en code HTML.');
+   else if(p.status>=400||p.text.length<300)errs.push('Page inutilisable (HTTP '+p.status+') : '+u);
+   else S[k].push({url:u,html:p.text,doc:dom(p.text)})}
+  catch(e){errs.push('Page injoignable : '+u)}}
+ IMPL.forEach(x=>{if(S[x.kind]&&!S[x.kind].some(y=>y.url&&y.url==x.url))S[x.kind].push({url:x.url,html:x.html,doc:dom(x.html)})});
+ return{S,errs}}
+// compare les pages : ce qui revient sur chaque page = le bon réglage
+function learn(GS,org){
+ const R=[],set={},add=(k,m)=>R.push([k,m]),F=GS.S.fiche,C=GS.S.chap,pn=u=>{try{return new URL(u).pathname}catch{return''}};
+ GS.errs.forEach(e=>add('w',e));
+ if(F.length){
+  const segs=F.map(x=>pn(x.url).split('/').filter(Boolean)).filter(s=>s.length>=2);
+  if(segs.length&&segs.every(s=>s[0]==segs[0][0])){set.list='/'+segs[0][0]+'/';add('ok','Liens d\'œuvres : '+(segs.length>1?'les '+segs.length+' fiches commencent toutes par':'la fiche commence par')+' « '+set.list+' »'+(segs.length>1?'':' (ajoute une 2e fiche pour confirmer)'))}
+  else if(segs.length>1)add('w','Les fiches ne commencent pas par le même début d\'adresse : je garde celui détecté sur l\'accueil.');
+  const votes={},revs={0:0,1:0};
+  F.forEach(x=>{const own=pn(x.url),g=chapGuess(lnk(x.doc,org).filter(([p])=>p!=own));if(!g)return;votes[g.chap]=(votes[g.chap]||0)+1;revs[g.rev]++});
+  const best=Object.entries(votes).sort((a,b)=>b[1]-a[1])[0];
+  if(best){set.chap=best[0];add(best[1]==F.length?'ok':'w','Liens de chapitres : « '+best[0]+' » revient sur '+best[1]+'/'+F.length+' fiche(s)');
+   set.rev=revs[1]>revs[0];add('ok',set.rev?'Chapitres listés du plus récent au plus ancien : je les remets dans l\'ordre.':'Chapitres déjà dans l\'ordre.')}
+  else add('w','Aucun motif de lien de chapitre commun trouvé dans les fiches.')}
+ if(C.length){
+  const cls={},tot={},imgs={};
+  C.forEach(x=>{const a=new Set(),b=new Set();
+   cands(x.doc).forEach(c=>{if(c.cls&&!a.has(c.cls)){a.add(c.cls);cls[c.cls]=(cls[c.cls]||0)+1;tot[c.cls]=(tot[c.cls]||0)+c.p}});
+   imgCls(x.doc).forEach(([k,v])=>{if(k&&v>=4&&!b.has(k)){b.add(k);imgs[k]=(imgs[k]||0)+1}})});
+  const bc=Object.keys(cls).sort((a,b)=>cls[b]-cls[a]||tot[b]-tot[a])[0],bi=Object.keys(imgs).sort((a,b)=>imgs[b]-imgs[a])[0];
+  if(bc&&(!bi||cls[bc]>=imgs[bi])){set.type='novel';set.cont=bc;set.next=false;add(cls[bc]==C.length?'ok':'w','Texte du chapitre : classe « '+bc+' » présente sur '+cls[bc]+'/'+C.length+' chapitre(s)')}
+  else if(bi){set.type='manga';set.img=bi;add(imgs[bi]==C.length?'ok':'w','Images du chapitre : classe « '+bi+' » présente sur '+imgs[bi]+'/'+C.length+' chapitre(s)')}
+  else add('w','Aucun conteneur de texte ni images communs dans les chapitres : le texte est peut-être rendu par JavaScript (Next.js).');
+  if(!set.chap&&C.length>1){const st=C.map(x=>(pn(x.url).split('/').filter(Boolean).pop()||'').replace(/\d.*$/,''));
+   if(st[0].length>=3&&st.every(x=>x==st[0])){set.chap=st[0];add('ok','Liens de chapitres : toutes les adresses de chapitre contiennent « '+st[0]+' »')}}}
+ if(F.length==1||C.length==1)add('w','Une seule page d\'un type : ajoute-en une 2e pour que le Hub puisse comparer.');
+ return{R,set,digest:{fiches:F.length,chapitres:C.length,reglages:set}}}
 // ---------- créer : une adresse -> IA -> .lua
 const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:''});
 let CFG=NEWCFG();
@@ -971,7 +1054,7 @@ const imgCls=d=>{const m={};d.querySelectorAll('img').forEach(i=>{const c=cls1(i
 const HINTS=[
  [/Colle l'adresse du site|Adresse invalide/,"Colle l'adresse complète d'une page du site, par exemple https://exemple.com (copie-la depuis la barre d'adresse de ton navigateur)."],
  [/CORS|Accès bloqué par le navigateur|Failed to fetch|NetworkError|Load failed/,"Le Hub n'a pas pu joindre le site (ou son proxy intégré). Vérifie ta connexion, l'adresse du site, puis réessaie dans un moment. Si ça persiste, le Worker Cloudflare du Hub est peut-être hors service ou a atteint son quota gratuit du jour."],
- [/Site protégé|anti-bot/,"Ce site bloque les lecteurs automatiques (Cloudflare / CAPTCHA). Le Hub ne contourne pas ces protections, donc il n'y a rien à réparer ici : choisis un autre site, ou regarde dans l'onglet Catalogue si une source existe déjà pour ce site. Astuce : tu peux quand même coller le code source d'une page dans la case « 🆘 Ça ne marche pas ? » plus bas, je m'en servirai pour trouver les réglages."],
+ [/Site protégé|anti-bot/,"Ce site bloque les lecteurs automatiques (Cloudflare / CAPTCHA). Le Hub ne contourne pas ces protections, donc il n'y a rien à réparer ici : choisis un autre site, ou regarde dans l'onglet Catalogue si une source existe déjà pour ce site. Astuce : importe la page en .mhtml ou en code HTML dans « 📄 Plusieurs pages d'exemple » (en haut), ou colle le code source d'une page dans la case « 🆘 Ça ne marche pas ? » plus bas, je m'en servirai pour trouver les réglages."],
  [/binding « AI » manquant|Workers AI n'est pas actif/,"L'IA n'est pas disponible sur le Worker du Hub (binding Workers AI nommé AI manquant, côté Cloudflare). Sans IA, le Hub marche quand même avec des réglages automatiques que tu peux corriger dans « Réglages détectés »."],
  [/Réponse vide du modèle IA/,"L'IA a renvoyé une réponse vide. Relance une 2e fois : l'IA est parfois capricieuse."],
  [/Réponse IA illisible|Erreur Workers AI|Erreur IA|IA indisponible|Correction IA impossible/,"L'IA n'a pas pu répondre (quota gratuit atteint, modèle indisponible ou réponse mal formée). Réessaie dans quelques minutes. En attendant, les réglages automatiques sont utilisés : corrige-les si besoin dans « Réglages détectés » puis « Régénérer et tester »."],
@@ -1298,10 +1381,11 @@ async function generate(){
  $('#cout').innerHTML='';
  try{
   let u=$('#cu').value.trim();
+  if(!u){const iu=IMPL.find(x=>x.url);if(iu){try{u=new URL(iu.url).origin}catch{}}}
   if(!u)throw new Error("Colle l'adresse du site.");
   if(!/^https?:\/\//i.test(u))u='https://'+u;
   try{new URL(u)}catch{throw new Error('Adresse invalide.')}
-  $('#cu').value=u;btn.disabled=true;CFG=NEWCFG();PROP={list:[],browse:''};DET={list:[],browse:''};
+  $('#cu').value=u;const ih=IMPL.find(x=>x.kind=='home');if(ih)IMP[nk(u)]=ih.html;btn.disabled=true;CFG=NEWCFG();PROP={list:[],browse:''};DET={list:[],browse:''};
   const org=new URL(u).origin;
   let ai=await aiOn(),aiWhy=!ai?'Workers AI n\'est pas actif sur le proxy (binding « AI » manquant)':'';
   say("Lecture de la page d'accueil…");
@@ -1322,8 +1406,11 @@ async function generate(){
      if(best)CFG.cont=best.cls;
      if(!cc.length&&im[0]&&im[0][1]>=4){CFG.type='manga';CFG.img=im[0][0]}}}
   }catch(e){S.note='lecture partielle : '+e.message}}
+  let learned=null;
+  {const GS=await gatherSamples(org);
+   if(GS.S.fiche.length||GS.S.chap.length||GS.errs.length){say("Comparaison des pages d'exemple…");const L=learn(GS,org);FIXMSG=L.R;learned=L.set;S.exemples=L.digest;applySet(L.set)}}
   if(ai){say("Analyse par l'IA…");try{applyCfg(await aiAsk(AISYS,JSON.stringify(S)))}catch(e){ai=false;aiWhy='IA indisponible : '+e.message}}
-  if(eng)applyEngine(eng);
+  if(eng)applyEngine(eng);if(learned)applySet(learned);
   say('Génération et test automatique…');
   let t=await runTests(cfg()),loop=null;
   if(ai&&t.some(x=>x[0]=='e')){const r=await fixLoop(t,say);t=r.t;loop=r.hist;if(r.aiWhy)aiWhy=r.aiWhy}
