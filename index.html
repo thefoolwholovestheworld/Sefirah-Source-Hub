@@ -45,12 +45,13 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 <small id="cn"></small><div class="grid" id="cg"></div></section>
 
 
+<section id="moteurs"><div class="card"><h2 style="margin:0 0 4px">Moteurs prêts à l'emploi</h2><p style="margin:0;color:var(--m)">Le Hub reconnaît le moteur d'un site par sa signature et remplit un modèle éprouvé au lieu de deviner.</p></div><div class="grid" id="eg"></div></section>
 </main>
 <dialog id="dlg"><div class="row"><b id="dt"></b><button class="b s" onclick="dlg.close()">Fermer</button></div><pre id="dc"></pre></dialog>
 <script>
 const $=s=>document.querySelector(s),H=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
-const TABS=[['creer','Créer'],['catalogue','Catalogue']];
+const TABS=[['creer','Créer'],['catalogue','Catalogue'],['moteurs','Moteurs']];
 const nav=$('#nav');TABS.forEach(([id,l])=>{const b=document.createElement('button');b.textContent=l;b.onclick=()=>show(id);b.dataset.id=id;nav.append(b)});
 function show(id){document.querySelectorAll('section').forEach(s=>s.classList.toggle('on',s.id==id));nav.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.id==id));location.hash=id}
 const LS={get:(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{alert('Stockage local indisponible')}}};
@@ -81,8 +82,136 @@ function cat(){const q=$('#cq').value.toLowerCase(),l=$('#cl').value,t=$('#ct').
 $('#cg').onclick=async e=>{const b=e.target.closest('button');if(!b)return;const x=SRC.find(s=>s.id==b.dataset.i);
  if(b.dataset.a=='c'){const u=new URL(x.file,location.href).href;try{await navigator.clipboard.writeText(u);b.textContent='Copié ✔'}catch{prompt('Lien :',u)}return}
  const t=await (await fetch(x.file)).text();b.dataset.a=='v'?viewCode(x.id+'.lua',t):dl(x.id+'.lua',t)};
+// ---------- 4. bibliothèque de moteurs : signature -> modèle éprouvé
+const ENGINES={
+ madara:{label:'Madara (WordPress)',sig:/wp-manga|madara|manga-chapters-holder|c-tabs-item/i,
+  desc:'Thème WordPress Madara (wp-manga). Signature : wp-manga / madara dans la page. Modèle : liste /manga/?m_orderby=views, recherche ?s=…&post_type=wp-manga, chapitres dans la fiche ou via /ajax/chapters/, images en data-src, auteur / statut / genres lus automatiquement.'},
+ next:{label:'Next.js (self.__next_f)',sig:/self\.__next_f|__NEXT_DATA__/,
+  desc:'Sites React / Next.js dont les données sont dans le flux self.__next_f. Signature : __next_f. Modèle : le « Mode Next.js » existant (fiche, chapitres, texte lus dans le JSON, API des chapitres devinée).'},
+ wpjson:{label:'WordPress REST (/wp-json/)',sig:/\/wp-json\//,
+  desc:'Site WordPress avec API REST ouverte. Signature : /wp-json/. Modèle : recherche via /wp-json/wp/v2/search (JSON), liste et chapitres en HTML.'}};
+const detectEngine=h=>{const s=String(h||'');for(const k of ['madara','next','wpjson'])if(ENGINES[k].sig.test(s))return k;return ''};
+// applique les réglages sûrs du moteur (ne touche que ce que la signature garantit)
+function applyEngine(e){
+ if(!ENGINES[e]){CFG.engine='';return}
+ const org=siteBase();CFG.engine=e;
+ if(e=='madara'){
+  if(!/^\/(manga|novel|series|webtoon|comic|project)\/$/.test(CFG.list||''))CFG.list='/manga/';
+  if(CFG.list=='/novel/')CFG.type='novel';
+  if(org)CFG.search=org+'/?s={q}&post_type=wp-manga';
+  CFG.chap='/chapter-';CFG.cont='reading-content';CFG.img='wp-manga-chapter-img'}
+ else if(e=='wpjson'){if(org)CFG.search=org+'/wp-json/wp/v2/search?search={q}&per_page=20&page={page}'}}
+$('#eg').innerHTML=Object.values(ENGINES).map(x=>`<div class="card"><b>${H(x.label)}</b><br><small>${H(x.desc)}</small></div>`).join('');
+// Lua du moteur Madara (ajouté APRÈS le code générique : redéfinit liste, recherche, fiche, chapitres)
+function madaraLua(c,fx,man){return `
+-- ===== MOTEUR MADARA (WordPress) : modèle éprouvé =====
+local MROOT = ((LISTP ~= "" and LISTP or "/manga/"):gsub("/+$", ""))
+local function m_list_url(page, order)
+    local p = tonumber(page) or 1
+    return BASE .. MROOT .. (p > 1 and ("/page/" .. p) or "") .. "/?m_orderby=" .. order
+end
+function ext:popularNovels(page${fx?', options':''})
+    local html, err = get(${fx?'(BROWSE ~= "" and browse_url(page, options)) or m_list_url(page, "views")':'m_list_url(page, "views")'})
+    if not html then return { novels = {}, error = "Site injoignable (" .. tostring(err) .. ")" } end
+    return { novels = parse_list(html) }
+end
+function ext:searchNovels(term, page${fx?', options':''})
+    term = tostring(term or ""):match("^%s*(.-)%s*$")
+    if term == "" then return ext:popularNovels(page${fx?', options':''}) end
+    local p = tonumber(page) or 1
+    local html, err = get(BASE .. (p > 1 and ("/page/" .. p) or "") .. "/?s=" .. enc(term) .. "&post_type=wp-manga")
+    if not html then return { novels = {}, error = "Recherche impossible (" .. tostring(err) .. ")" } end
+    return { novels = parse_list(html) }
+end
+local function m_meta(html, path)
+    local m = meta(html, path)
+    local sm = grab(html, "summary__content") or grab(html, "description-summary")
+    if sm then local d = para(sm); if #d > 40 then m.summary = d end end
+    local a = html:match('class="author%-content"[^>]*>(.-)</div>')
+    if a then m.author = txt(a) end
+    local s = html:match('post%-status.-summary%-content[^>]*>(.-)</div>')
+    if s then m.status = txt(s) end
+    local g = html:match('class="genres%-content"[^>]*>(.-)</div>')
+    if g then for x in g:gmatch("<a[^>]*>(.-)</a>") do m.genres[#m.genres + 1] = txt(x) end end
+    return m
+end
+function ext:parseNovelMeta(path)
+    local html = get(path); if not html then return nil end
+    local m = m_meta(html, path); m.total_chapters = 0; return m
+end
+-- chapitres : d'abord dans la page, sinon POST <fiche>/ajax/chapters/ (si core.net.post existe)
+local MCH = (CHAPP ~= "" and CHAPP or "/chapter-"):lower()
+local function m_collect(html, path, seen, ch)
+    local pk = norm(path)
+    for tag, ih in html:gmatch("(<a%s[^>]->)(.-)</a>") do
+        local href = attr(tag, "href")
+        if href then
+            local k = norm(href)
+            if not seen[k] and k ~= pk and k:find(pk, 1, true) and k:find(MCH, 1, true) then
+                seen[k] = true
+                local name = txt(ih)
+                if name == "" then name = dec(attr(tag, "title") or "") end
+                if name == "" then name = "Chapitre " .. (#ch + 1) end
+                ch[#ch + 1] = { name = name, path = rel(href) }
+            end
+        end
+    end
+end
+local function m_ajax(path)
+    local net = require("core.net")
+    if type(net.post) ~= "function" then return nil end
+    local rp = path:gsub("^https?://[^/]+", "")
+    rp = rp:gsub("/+$", "")
+    local ok, body = pcall(net.post, BASE .. rp .. "/ajax/chapters/", "", { headers = { ["User-Agent"] = UA, ["Referer"] = BASE .. "/", ["X-Requested-With"] = "XMLHttpRequest" }, timeout = 15 })
+    if ok and type(body) == "string" and #body > 20 then return body end
+    return nil
+end
+function ext:parseNovel(path)
+    local html = get(path); if not html then return nil end
+    local m, ch, seen = m_meta(html, path), {}, {}
+    m_collect(html, path, seen, ch)
+    if #ch == 0 then
+        local aj = m_ajax(path)
+        if aj then m_collect(aj, path, seen, ch) end
+    end
+    -- l'ordre attendu est croissant : on inverse si la liste du site est décroissante
+    local function num(x) return tonumber((x.name or ""):match("(%d+%.?%d*)%s*$") or (x.path or ""):match("(%d+)[^%d]*$")) end
+    local a, b = ch[1] and num(ch[1]), ch[#ch] and num(ch[#ch])
+    if (a and b and a > b) or (not (a and b) and ${c.rev?'true':'false'}) then
+        for i = 1, math.floor(#ch / 2) do ch[i], ch[#ch + 1 - i] = ch[#ch + 1 - i], ch[i] end
+    end
+    for i, x in ipairs(ch) do x.chapter_number = i end
+    m.chapters, m.totalPages = ch, 1
+    return m
+end
+`}
+// Lua du moteur « WordPress REST » : recherche via /wp-json/wp/v2/search
+function wpjsonLua(c){return `
+-- ===== MOTEUR WORDPRESS REST : recherche JSON =====
+local function wp_json(s)
+    local ok_j, J = pcall(require, "rapidjson")
+    if not ok_j then J = require("json") end
+    local ok, d = pcall(J.decode, s)
+    if ok then return d end
+    return nil
+end
+function ext:searchNovels(term, page)
+    term = tostring(term or ""):match("^%s*(.-)%s*$")
+    if term == "" then return ext:popularNovels(page) end
+    local body, err = get(BASE .. "/wp-json/wp/v2/search?search=" .. enc(term) .. "&per_page=20&page=" .. tostring(tonumber(page) or 1) .. "&_fields=id,title,url")
+    local data = body and wp_json(body)
+    if type(data) ~= "table" then return { novels = {}, error = "Recherche REST impossible (" .. tostring(err) .. ")" } end
+    local out = {}
+    for _, n in ipairs(data) do
+        if type(n) == "table" and type(n.url) == "string" and (LISTP == "" or n.url:find(LISTP, 1, true)) then
+            out[#out + 1] = { name = dec(tostring(n.title or n.url)), path = rel(n.url) }
+        end
+    end
+    return { novels = out }
+end
+`}
 // ---------- créer : une adresse -> IA -> .lua
-const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:''});
+const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:''});
 let CFG=NEWCFG();
 const siteBase=()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}};
 // cfg() : la configuration « propre » utilisée pour générer le .lua et pour les tests (filtres et adresse validés)
@@ -742,7 +871,8 @@ function ext:parseChapterImages(path)
     for tag in html:gmatch("<img[^>]->") do
         local cls = attr(tag, "class") or ""
         if ("${ls(c.img)}" == "" or cls:find("${ls(c.img)}", 1, true)) then
-            local u = abs(dec(attr(tag, "data-src") or attr(tag, "data-lazy-src") or attr(tag, "data-original") or attr(tag, "src")))
+            local raw = attr(tag, "data-src") or attr(tag, "data-lazy-src") or attr(tag, "data-original") or attr(tag, "src")
+            local u = raw and abs(dec(raw:match("^%s*(.-)%s*$")))
             if u and not seen[u] and not u:match("^data:") and not u:find("logo", 1, true) then seen[u] = true; images[#images+1] = u end
         end
     end
@@ -769,7 +899,7 @@ function ext:parseChapter(path)
     if not body or #body < 50 then return "<p>Texte du chapitre introuvable (classe « " .. CONT .. " »).</p>" end
     return body
 end
-`}${nx?nextLua(c):''}
+`}${nx?nextLua(c):''}${c.engine=='madara'?madaraLua(c,fx,man):c.engine=='wpjson'?wpjsonLua(c):''}
 return ext
 `,meta:`{ id = "${id}", name = "${ls(c.name)}", site = "${ls(c.base)}", lang = "${ls(c.lang)}", version = "${ls(c.ver)}", runtime = "lua"${man?', type = "manga"':''} },`}}
 const PXB=()=>PROXY;
@@ -940,7 +1070,12 @@ async function runTests(c){
   const h=links(dom(p.text),list);
   h.length?add('ok','Accueil : '+h.length+' liens d\'œuvres'):add('w','Accueil : aucun lien contenant « '+list+' »');
   let first;
-  if(!c.search)add('s','Recherche non testée (URL absente)');
+  if(c.engine=='wpjson'){
+   const q=await gd('search',base+'/wp-json/wp/v2/search?search='+encodeURIComponent(c.lang=='fr'?'amour':'love')+'&per_page=20&_fields=id,title,url');
+   try{const j=JSON.parse(q.text),a=(Array.isArray(j)?j:[]).filter(x=>x&&x.url&&(!list||x.url.includes(list)));
+    a.length?(add('ok','Recherche REST WordPress : '+a.length+' œuvre(s)'),first=a[0].url):add('w','Recherche REST : aucun résultat dans « '+list+' » (l\'API /wp-json/ est peut-être fermée)')}
+   catch{add('w','Recherche REST : réponse illisible')}}
+  else if(!c.search)add('s','Recherche non testée (URL absente)');
   else{
    const q=await gd('search',c.search.replace('{q}',encodeURIComponent(c.lang=='fr'?'amour':'love')).replace('{page}','1'));
    if(blocked(q))add('e','Recherche bloquée (anti-bot)');
@@ -991,6 +1126,7 @@ async function runTests(c){
    Object.assign(CFG,K,{next:true})};
   const cl=chap?links(fd,chap):[];
   if(nextSite&&(c.next||!cl.length)){await nm();return R}
+  if(!cl.length&&c.engine=='madara'){add('w','Madara : la liste des chapitres semble chargée en AJAX (/ajax/chapters/), non testable depuis le navigateur : à vérifier sur la liseuse');return R}
   if(!cl.length){add('e','Aucun lien de chapitre contenant « '+chap+' »');return R}
   add('ok','Chapitres : '+cl.length+' liens');
   const nums=cl.map(a=>+(a.textContent.match(/(\d+(?:\.\d+)?)\s*$/)||a.textContent.match(/(\d+(?:\.\d+)?)/)||[])[1]).filter(x=>!isNaN(x));
@@ -1038,8 +1174,8 @@ const propHtml=()=>{if(!PROP.list.length)return '';
  <div class="row"><button class="b" id="pf_ok">✅ Garder les filtres cochés</button><button class="b s" id="pf_no">Ignorer</button></div></div>`};
 
 // affichage du résultat : fichier .lua + tests + réglages modifiables
-function readAdv(){const g=id=>document.getElementById(id);if(!g('a_name'))return;const v=id=>g(id).value.trim();
- CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1',next:v('a_next')=='1',nkNovel:v('a_nkn'),nkChap:v('a_nkc'),nkPara:v('a_nkp'),nkText:v('a_nkt'),nkContent:v('a_nkx'),apiChap:v('a_apic'),apiSearch:v('a_apis'),filters:readFilters(),browse:v('a_browse')}}
+function readAdv(){const g=id=>document.getElementById(id);if(!g('a_name'))return;const pe=CFG.engine;const v=id=>g(id).value.trim();
+ CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1',next:v('a_next')=='1',nkNovel:v('a_nkn'),nkChap:v('a_nkc'),nkPara:v('a_nkp'),nkText:v('a_nkt'),nkContent:v('a_nkx'),apiChap:v('a_apic'),apiSearch:v('a_apis'),filters:readFilters(),browse:v('a_browse'),engine:g('a_eng')?v('a_eng'):CFG.engine};if(CFG.engine&&CFG.engine!=pe)applyEngine(CFG.engine)}
 function renderResult(tests,info,openAdv){
  const c=cfg(),g=genLua(c),bad=tests.filter(t=>t[0]=='e'),miss=[];
  const lp=info.loop;info={...info,loop:null};const fix=FIXMSG;FIXMSG=[];LASTINFO=info;
@@ -1057,7 +1193,7 @@ function renderResult(tests,info,openAdv){
  const bwhy=chkBrowse(CFG.browse,c.base).why;
  $('#cout').innerHTML=`<div class="card"><div class="sh">${ico(c.base,32)}<div><b>${H(c.name)}</b><br><small>${H(c.base.replace(/^https?:\/\//,''))}</small></div><button class="b s" id="icb" style="margin-left:auto">⬇ Icône</button></div><p class="${k}" style="margin-top:0"><b>${H(msg)}</b></p>
  ${miss.map(m=>`<span class="fx">🛠 Pour trouver ${H(MISS[m][0])} : ${H(MISS[m][1])}</span>`).join('')}
- <small>${why}</small>${info.aiWhy?fx(info.aiWhy):''}${fixHtml}${loopHtml(lp)}${bad.length&&info.ai?'<div class="row"><button class="b s" id="lpb">🔁 Relancer la correction automatique</button></div><div id="lpm"></div>':''}${propHtml()}
+ <small>${why}</small>${c.engine&&ENGINES[c.engine]?`<p style="margin:6px 0">⚙ Moteur détecté : <b>${H(ENGINES[c.engine].label)}</b> — modèle éprouvé appliqué.</p>`:''}${info.aiWhy?fx(info.aiWhy):''}${fixHtml}${loopHtml(lp)}${bad.length&&info.ai?'<div class="row"><button class="b s" id="lpb">🔁 Relancer la correction automatique</button></div><div id="lpm"></div>':''}${propHtml()}
  <div class="row" style="margin-top:10px"><button class="b" id="dlb">⬇ Télécharger ${H(g.id)}.lua</button><button class="b" id="tsb">📱 Tester sur liseuse</button><button class="b s" id="cpb">Copier le code</button><button class="b s" id="vwb">Voir le code</button></div>
  <div id="rcv"></div>
  <details class="help" open><summary>Détail des tests (${tests.length})</summary><ul>${tests.map(r=>`<li class="${r[0]}">${ic[r[0]]} ${H(r[1])}${r[0]=='ok'?'':fx(r[1],r[0]=='e')}</li>`).join('')}</ul></details>
@@ -1067,6 +1203,7 @@ function renderResult(tests,info,openAdv){
   ${inp('a_search','Adresse d\'une recherche HTML (avec {q} et {page})',c.search,'https://exemple.com/search?q={q}')}
   <div class="row"><div>${inp('a_list','Liens d\'œuvre contiennent',c.list,'/novel/')}</div><div>${inp('a_chap','Liens de chapitre contiennent',c.chap,'/chapter/')}</div></div>
   <div class="row"><div>${inp('a_cont','Classe CSS du texte (roman)',c.cont,'chapter-content')}</div><div>${inp('a_img','Classe CSS des images (manga)',c.img,'page-img')}</div><div><label>Ordre des chapitres</label><select id="a_rev"><option value="0" ${c.rev?'':'selected'}>Tel quel</option><option value="1" ${c.rev?'selected':''}>Inverser</option></select></div></div>
+  <div class="row"><div><label>Moteur</label><select id="a_eng"><option value="">Aucun (génération générique)</option>${Object.entries(ENGINES).map(([k,x])=>`<option value="${k}" ${c.engine==k?'selected':''}>${H(x.label)}</option>`).join('')}</select><span class="hint">Changer de moteur réapplique ses réglages (adresses, classes) : vérifie-les ensuite.</span></div></div>
   <p style="margin:12px 0 2px"><b>Filtres</b> <small>(genre, statut, tri… comme sur le site)</small></p>
   <span class="hint">Un filtre = une liste de choix que tu pourras changer sur la liseuse. Exemple : « Genre » avec les choix Action, Romance… Sans filtre, le fichier reste comme avant.</span>
   <div id="f_list">${CFG.filters.map(filterCard).join('')}</div>
@@ -1136,7 +1273,7 @@ async function generate(){
   const org=new URL(u).origin;
   let ai=await aiOn(),aiWhy=!ai?'Workers AI n\'est pas actif sur le proxy (binding « AI » manquant)':'';
   say("Lecture de la page d'accueil…");
-  const {d:hd}=await analyzeHome(u);
+  const {p:hp,d:hd}=await analyzeHome(u);const eng=detectEngine(hp.text);
   const hl=lnk(hd,org),lp0=CFG.list;
   // filtres vus sur l'accueil (selects, cases, liens répétés) : proposés à l'utilisateur, jamais ajoutés sans son choix (hors IA)
   try{DET=detectFilters(hd,org,u);PROP={list:DET.list.slice(),browse:DET.browse}}catch{}
@@ -1153,6 +1290,7 @@ async function generate(){
      if(!cc.length&&im[0]&&im[0][1]>=4){CFG.type='manga';CFG.img=im[0][0]}}}
   }catch(e){S.note='lecture partielle : '+e.message}}
   if(ai){say("Analyse par l'IA…");try{applyCfg(await aiAsk(AISYS,JSON.stringify(S)))}catch(e){ai=false;aiWhy='IA indisponible : '+e.message}}
+  if(eng)applyEngine(eng);
   say('Génération et test automatique…');
   let t=await runTests(cfg()),loop=null;
   if(ai&&t.some(x=>x[0]=='e')){const r=await fixLoop(t,say);t=r.t;loop=r.hist;if(r.aiWhy)aiWhy=r.aiWhy}
