@@ -1810,6 +1810,14 @@ function listItems(doc,c){const out=[],idx={};
 // charge la liste (accueil, adresse avec filtres ou recherche) avec la même adresse que celle du .lua ; sel = choix des filtres
 async function loadList(c,term,sel){
  const J=joinOf(c.filters);let url,type;
+ // sites Next.js : la recherche passe par l'API (même logique que le .lua généré)
+ if(term&&c.apiSearch&&c.next){const url=c.base+c.apiSearch.replace('{q}',enc(term)),r=await getPage(url);
+  if(r.status>=400)throw new Error('La recherche par API répond HTTP '+r.status);
+  let j;try{j=JSON.parse(r.text)}catch{throw new Error("La recherche par API n'a pas répondu en JSON.")}
+  const a=Array.isArray(j)?j:(j.novels||j.results||j.items||[]),root=(c.list||'/novel/').replace(/\/+$/,'');
+  const items=a.filter(n=>n&&typeof n.slug=='string').map(n=>{const cv=n.coverImage||n.cover||n.coverUrl||n.image||n.thumbnail;
+   return{name:String(n.title||n.name||n.slug),path:root+'/'+n.slug,cover:typeof cv=='string'&&cv?new URL(cv,c.base+'/').href:''}});
+  return{items,url,paste:false}}
  if(term){if(!c.search)throw new Error("Je n'ai pas encore l'adresse de recherche de ce site.");url=expandUrl(c.search,sel,term,1,J);type='search'}
  else if(c.browse){url=expandUrl(c.browse,sel,'',1,J);type='list'}
  else{url=c.base+'/';type='home'}
