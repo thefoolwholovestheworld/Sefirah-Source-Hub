@@ -2199,8 +2199,11 @@ async function loadNovel(c,path){
    const d=nov.description||nov.synopsis;if(typeof d=='string'&&d[0]!='$')m.summary=d;
    const ci=nov.coverImage||nov.cover||nov.image;if(typeof ci=='string')m.cover=new URL(ci,c.base+'/').href;
    const base=path.replace(/\/+$/,'');
-   if(c.apiChap){try{const slug=base.split('/').pop(),r=await getPage((/^https?:/.test(c.apiChap)?'':c.base)+c.apiChap.replace('{slug}',slug).replace('{skip}','0')),j=JSON.parse(r.text);
-     const a=j.chapters||j.data||j.items||(Array.isArray(j)?j:[]);chs=a.filter(x=>x&&x.slug).map((x,i)=>({name:String(x.title||x.name||'Chapitre '+(i+1)),path:base+'/'+x.slug}))}catch{}}
+   if(c.apiChap){try{const slug=base.split('/').pop(),pre=/^https?:/.test(c.apiChap)?'':c.base,paged=c.apiChap.includes('{skip}');
+     for(let pg2=0;pg2<100;pg2++){const r=await getPage(pre+c.apiChap.replace('{slug}',slug).replace('{skip}',String(chs.length))),j=JSON.parse(r.text);
+      const a=(j.chapters||j.data||j.items||(Array.isArray(j)?j:[])).filter(x=>x&&x.slug);
+      a.forEach(x=>chs.push({name:String(x.title||x.name||'Chapitre '+(chs.length+1)),path:base+'/'+x.slug}));
+      const tot=+j.total||0;if(!a.length||!paged||j.hasMore===false||(tot&&chs.length>=tot))break}}catch{}}
    else if(c.nkList&&Array.isArray(nov[c.nkList]))chs=nov[c.nkList].filter(x=>x&&x.slug).map((x,i)=>({name:String(x.title||x.name||'Chapitre '+(i+1)),path:base+'/'+x.slug}))}}
  else{const seen={};
   doc.querySelectorAll('a[href]').forEach(a=>{const h=a.getAttribute('href')||'';
