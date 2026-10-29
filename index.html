@@ -450,7 +450,7 @@ async function probeSearchApi(org,lang){
  return ''}
 // ---------- créer : une adresse -> IA -> .lua
 const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:'',rvo:'auto',rvm:'',rvu:'',rvc:'',apiList:''});
-let CFG=NEWCFG();
+let CFG=NEWCFG(),LASTORG='';
 const siteBase=()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}};
 // cfg() : la configuration « propre » utilisée pour générer le .lua et pour les tests (filtres et adresse validés)
 const cfg=()=>{const base=siteBase();return {...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,apiList:chkBrowse(CFG.apiList,base).ok,rvm:CFG.rvo=='off'||!['wp','json','page'].includes(CFG.rvm)?'':CFG.rvm,rvu:sf(CFG.rvu,120),rvc:tok(CFG.rvc)?CFG.rvc:''}};
@@ -1734,7 +1734,7 @@ async function generate(){
   if(!u)throw new Error("Colle l'adresse du site.");
   if(!/^https?:\/\//i.test(u))u='https://'+u;
   try{new URL(u)}catch{throw new Error('Adresse invalide.')}
-  $('#cu').value=u;const ih=IMPL.find(x=>x.kind=='home');if(ih)IMP[nk(u)]=ih.html;btn.disabled=true;CFG=NEWCFG();PROP={list:[],browse:''};DET={list:[],browse:''};
+  $('#cu').value=u;const ih=IMPL.find(x=>x.kind=='home');if(ih)IMP[nk(u)]=ih.html;btn.disabled=true;const prevC=CFG,orgN=new URL(u).origin;CFG=NEWCFG();if(LASTORG==orgN){CFG.filters=prevC.filters||[];CFG.browse=prevC.browse||'';CFG.apiList=prevC.apiList||''}LASTORG=orgN;PROP={list:[],browse:''};DET={list:[],browse:''};
   const org=new URL(u).origin;
   let ai=await aiOn(),aiWhy=!ai?'Workers AI n\'est pas actif sur le proxy (binding « AI » manquant)':'';
   say("Lecture de la page d'accueil…");
