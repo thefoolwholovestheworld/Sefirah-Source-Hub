@@ -1734,6 +1734,15 @@ function rscArrays(st){const out=[],re=/"([A-Za-z_]\w{2,30})":\[\{/g;let m;
   try{const a=JSON.parse(st.slice(i,j+1));if(Array.isArray(a)&&a.length>=3&&a.every(x=>x&&typeof x.slug=='string'&&typeof (x.name||x.title)=='string'))out.push([m[1],a])}catch{}
   re.lastIndex=Math.max(re.lastIndex,j)}
  return out}
+// listes d'options lues dans le JavaScript du site (tri, statut) : les vraies valeurs et les vrais noms, pas des suppositions
+async function jsLists(org,html){const out={},srcs=[...dom(html).querySelectorAll('script[src]')].map(e=>{try{return new URL(e.getAttribute('src'),org+'/')}catch{return null}}).filter(u=>u&&u.origin==org&&/\.js(\?|$)/.test(u.pathname)).map(u=>u.href).slice(0,14);
+ const txts=await Promise.all(srcs.map(async u=>{try{const p=await getPage(u);return p.status<400?p.text:''}catch{return ''}}));
+ const re=/\{(?:value|id|key):"([^"]{1,30})",(?:label|name|title):"([^"]{1,40})"[^{}]{0,40}\}|\{(?:label|name|title):"([^"]{1,40})",(?:value|id|key):"([^"]{1,30})"[^{}]{0,40}\}/g;
+ txts.forEach(t=>{let m,g=[],end=-99;const flush=()=>{if(g.length>=3){const v=g.map(x=>x[0].toLowerCase()),
+   k=v.some(x=>/^(completed|ongoing)$/.test(x))?'status':v.some(x=>/^(popular|rating|newest|latest|updated|views)$/.test(x))?'sort':'';
+   if(k&&(!out[k]||g.length>out[k].length))out[k]=g}g=[]};
+  while((m=re.exec(t))){if(t.slice(end,m.index)!==',')flush();g.push(m[1]?[m[1],m[2]]:[m[4],m[3]]);end=m.index+m[0].length}flush()});
+ return out}
 async function autoFilters(org,hd){
  const list=CFG.list;if(!list)return;
  const T=async u=>{try{const p=await getPage(u);return p&&!blocked(p)&&p.status<400?p.text:null}catch{return null}};
@@ -1743,14 +1752,17 @@ async function autoFilters(org,hd){
  for(const p of [...new Set([...nav,'/browse','/explore','/series','/novels'])].slice(0,6)){const h=await T(org+p),s=sig(h);if(new Set(s).size>=4){u0=org+p;h0=h;S0=s;break}}
  if(!u0)return;
  const K=a=>a.join('|'),P=encodeURIComponent,diff=async q=>{const s=sig(await T(u0+'?'+q));return s.length&&K(s)!=K(S0)?s:null};
+ let jl={};try{jl=await jsLists(org,h0)}catch{}
  const cand=[],seen=new Set(),add=f=>{if(!seen.has(f.key)&&cand.length<8){seen.add(f.key);cand.push(f)}};
- [['status',['ongoing','completed','hiatus','cancelled']],['sort',['popular','newest','latest','updated','rating','views']]].forEach(([k,v])=>add({key:k,param:k,label:humanize(k),vocab:v,options:[]}));
+ [['status',['ongoing','completed','hiatus','cancelled']],['sort',['popular','newest','latest','updated','rating','views','chapters','title']]].forEach(([k,v])=>add({key:k,param:k,label:humanize(k),vocab:v,jo:jl[k],options:[]}));
  try{detectFilters(dom(h0),org,u0).list.forEach(f=>f.param&&f.style=='query'&&add({...f,key:skey(f.param)}))}catch{}
  const best={};rscArrays(rscStream(h0)).forEach(([k,a])=>{if(!best[k]||a.length>best[k].length)best[k]=a});
  Object.entries(best).forEach(([k,a])=>add({key:skey(k),param:k,label:humanize(k),multi:true,
   options:a.map(x=>({id:sid(x.slug),label:sf(x.name||x.title,40)})),big:a.slice().sort((x,y)=>((y._count||{}).novels||0)-((x._count||{}).novels||0)).map(x=>sid(x.slug))}));
  const ok=[];
  for(const f of cand){
+  if(f.vocab&&f.jo){let real=false;for(const x of f.jo.slice(0,4))if(await diff(f.param+'='+P(x[0]))){real=true;break}
+   if(real)ok.push({...f,multi:false,options:[{id:'all',label:f.key=='sort'?'Par défaut':'Tous'},...f.jo.map(x=>({id:sid(x[0]),label:sf(x[1],40)}))]});continue}
   if(f.vocab){const o=(await Promise.all(f.vocab.map(async v=>{for(const x of [v,v.toUpperCase()])if(await diff(f.param+'='+x))return{id:x,label:FLAB[v]||humanize(v)};return null}))).filter(Boolean);
    if(o.length)ok.push({...f,multi:false,options:[{id:'all',label:f.key=='sort'?'Par défaut':'Tous'},...o]});continue}
   const ids=(f.big||f.options.map(o=>o.id)).filter(Boolean),a=ids[0],b=ids[1];if(!a)continue;
@@ -1759,11 +1771,18 @@ async function autoFilters(org,hd){
   if(f.multi&&b){const c=sig(await T(u0+'?'+f.param+'='+P(a)+','+P(b))),r=sig(await T(u0+'?'+f.param+'='+P(a)+'&'+f.param+'='+P(b)));
    if(c.length&&K(c)!=K(one)){multi=true;join='comma'}else if(r.length&&K(r)!=K(one)){multi=true;join='rep'}}
   ok.push({...f,multi,join,options:multi?f.options:[{id:'all',label:'Tous'},...f.options]})}
+ // interrupteurs (« Auteurs NovelFrance ») : bouton à état + clé booléenne des données de la page
+  const bt=[...dom(h0).querySelectorAll('button[aria-pressed]:not([aria-label])')].map(b=>sf(b.textContent,40)).filter(t=>t.length>2);
+ let ifl={};try{ifl=JSON.parse(balanced(rscStream(h0),'initialFilters')||'{}')}catch{}
+ const bk=Object.keys(ifl).filter(k=>typeof ifl[k]=='boolean'),usedK=new Set(ok.map(f=>f.param));
+ for(const [i,k] of bk.entries()){const names=[...new Set([k.replace(/(Only|Selected|Enabled|Active)$/i,''),k])].filter(n=>!usedK.has(n));
+  let hit=null;for(const n of names){for(const v of ['1','true'])if(await diff(n+'='+v)){hit=[n,v];break}if(hit)break}
+  if(hit){usedK.add(hit[0]);ok.push({key:skey(hit[0]),param:hit[0],label:bt[i]||humanize(hit[0]),multi:false,toggle:true,options:[{id:'all',label:'Tous'},{id:hit[1],label:'Oui'}]})}}
  if(!ok.length)return;
  ok.sort((a,b)=>(b.vocab?1:0)-(a.vocab?1:0));
  const cur=CFG.filters||[],pm={},had=cur.length>0;
  ok.forEach(nf=>{pm[nf.key]=nf.param;const e=cur.find(x=>x.key==nf.key);
-  if(e)nf.options.forEach(o=>{if(!e.options.some(x=>x.id==o.id))e.options.push(o)});
+  if(e){nf.options.forEach(o=>{if(!e.options.some(x=>x.id==o.id))e.options.push(o)});if(e.label==humanize(e.key))e.label=nf.label}
   else cur.push({key:nf.key,label:nf.label,multi:!!nf.multi,join:nf.join||'rep',where:'browse',def:nf.multi?'':'all',options:nf.options})});
  CFG.filters=cur;
  const miss=ok.filter(f=>!(CFG.browse||'').includes('{'+f.key+'}'));
