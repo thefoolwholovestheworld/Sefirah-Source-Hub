@@ -1725,6 +1725,50 @@ function renderResult(tests,info,openAdv){LASTT=tests;
   renderResult(await runTests(cfg()),info,true)}}
 
 // bouton principal
+// ---------- FILTRES AUTOMATIQUES : trouve la page de liste, repère les filtres, puis VÉRIFIE chacun sur le site (un filtre qui ne change rien est jeté)
+const FLAB={ongoing:'En cours',completed:'Terminé',hiatus:'En pause',cancelled:'Abandonné',popular:'Populaire',newest:'Récent',latest:'Récent',updated:'Mis à jour',rating:'Mieux noté',views:'Plus lus'};
+function rscArrays(st){const out=[],re=/"([A-Za-z_]\w{2,30})":\[\{/g;let m;
+ while((m=re.exec(st))){const i=m.index+m[0].length-2;let d=0,str=false,esc=false,j=i;
+  for(;j<st.length;j++){const ch=st[j];if(str){if(esc)esc=false;else if(ch=='\\')esc=true;else if(ch=='"')str=false;continue}
+   if(ch=='"')str=true;else if(ch=='['||ch=='{')d++;else if(ch==']'||ch=='}'){d--;if(!d)break}}
+  try{const a=JSON.parse(st.slice(i,j+1));if(Array.isArray(a)&&a.length>=3&&a.every(x=>x&&typeof x.slug=='string'&&typeof (x.name||x.title)=='string'))out.push([m[1],a])}catch{}
+  re.lastIndex=Math.max(re.lastIndex,j)}
+ return out}
+async function autoFilters(org,hd){
+ const list=CFG.list;if(!list)return;
+ const T=async u=>{try{const p=await getPage(u);return p&&!blocked(p)&&p.status<400?p.text:null}catch{return null}};
+ const sig=h=>h?lnk(dom(h),org).map(x=>x[0]).filter(p=>p.includes(list)&&!(CFG.chap&&p.includes(CFG.chap))):[];
+ const nav=lnk(hd,org).map(x=>x[0]).filter(p=>/^\/(browse|explor\w*|series|novels?|library|catalogue|search|list)\/?$/i.test(p));
+ let u0='',h0='',S0=[];
+ for(const p of [...new Set([...nav,'/browse','/explore','/series','/novels'])].slice(0,6)){const h=await T(org+p),s=sig(h);if(new Set(s).size>=4){u0=org+p;h0=h;S0=s;break}}
+ if(!u0)return;
+ const K=a=>a.join('|'),P=encodeURIComponent,diff=async q=>{const s=sig(await T(u0+'?'+q));return s.length&&K(s)!=K(S0)?s:null};
+ const cand=[],seen=new Set(),add=f=>{if(!seen.has(f.key)&&cand.length<8){seen.add(f.key);cand.push(f)}};
+ [['status',['ongoing','completed','hiatus','cancelled']],['sort',['popular','newest','latest','updated','rating','views']]].forEach(([k,v])=>add({key:k,param:k,label:humanize(k),vocab:v,options:[]}));
+ try{detectFilters(dom(h0),org,u0).list.forEach(f=>f.param&&f.style=='query'&&add({...f,key:skey(f.param)}))}catch{}
+ const best={};rscArrays(rscStream(h0)).forEach(([k,a])=>{if(!best[k]||a.length>best[k].length)best[k]=a});
+ Object.entries(best).forEach(([k,a])=>add({key:skey(k),param:k,label:humanize(k),multi:true,
+  options:a.map(x=>({id:sid(x.slug),label:sf(x.name||x.title,40)})),big:a.slice().sort((x,y)=>((y._count||{}).novels||0)-((x._count||{}).novels||0)).map(x=>sid(x.slug))}));
+ const ok=[];
+ for(const f of cand){
+  if(f.vocab){const o=(await Promise.all(f.vocab.map(async v=>{for(const x of [v,v.toUpperCase()])if(await diff(f.param+'='+x))return{id:x,label:FLAB[v]||humanize(v)};return null}))).filter(Boolean);
+   if(o.length)ok.push({...f,multi:false,options:[{id:'all',label:f.key=='sort'?'Par défaut':'Tous'},...o]});continue}
+  const ids=(f.big||f.options.map(o=>o.id)).filter(Boolean),a=ids[0],b=ids[1];if(!a)continue;
+  const one=await diff(f.param+'='+P(a));if(!one)continue;
+  let multi=false,join='rep';
+  if(f.multi&&b){const c=sig(await T(u0+'?'+f.param+'='+P(a)+','+P(b))),r=sig(await T(u0+'?'+f.param+'='+P(a)+'&'+f.param+'='+P(b)));
+   if(c.length&&K(c)!=K(one)){multi=true;join='comma'}else if(r.length&&K(r)!=K(one)){multi=true;join='rep'}}
+  ok.push({...f,multi,join,options:multi?f.options:[{id:'all',label:'Tous'},...f.options]})}
+ if(!ok.length)return;
+ ok.sort((a,b)=>(b.vocab?1:0)-(a.vocab?1:0));
+ const cur=CFG.filters||[],pm={},had=cur.length>0;
+ ok.forEach(nf=>{pm[nf.key]=nf.param;const e=cur.find(x=>x.key==nf.key);
+  if(e)nf.options.forEach(o=>{if(!e.options.some(x=>x.id==o.id))e.options.push(o)});
+  else cur.push({key:nf.key,label:nf.label,multi:!!nf.multi,join:nf.join||'rep',where:'browse',def:nf.multi?'':'all',options:nf.options})});
+ CFG.filters=cur;
+ const miss=ok.filter(f=>!(CFG.browse||'').includes('{'+f.key+'}'));
+ CFG.browse=(CFG.browse||(u0+'?page={page}'))+miss.map(f=>'&'+f.param+'={'+f.key+'}').join('');
+ FIXMSG.push(['ok','Filtres trouvés et testés tout seuls sur '+u0.replace(org,'')+' : '+ok.map(f=>f.label+(f.options.length>2?' ('+(f.options.length-(f.multi?0:1))+')':'')).join(', ')])}
 async function generate(){
  const o=$('#cmsg'),btn=$('#cai'),say=m=>{o.innerHTML='<span class="sp"></span> '+H(m)};
  $('#cout').innerHTML='';
@@ -1761,6 +1805,7 @@ async function generate(){
   if(ai){say("Analyse par l'IA…");try{applyCfg(await aiAsk(AISYS,JSON.stringify(S)))}catch(e){ai=false;aiWhy='IA indisponible : '+e.message}}
   if(!CFG.search&&eng!='madara'&&eng!='wpjson'){say("Recherche d'une API de recherche…");const sa=await probeSearchApi(org,CFG.lang);if(sa){CFG.apiSearch=sa;if(eng=='next'||apis.some(a=>a.id=='nextf'||a.id=='nextdata'))CFG.next=true}}
   if(eng)applyEngine(eng);if(learned)applySet(learned);
+  say('Recherche des filtres du site…');try{await autoFilters(org,hd)}catch{}
   say('Génération et test automatique…');
   let t=await runTests(cfg()),loop=null;
   if(ai&&t.some(x=>x[0]=='e')){const r=await fixLoop(t,say);t=r.t;loop=r.hist;if(r.aiWhy)aiWhy=r.aiWhy}
