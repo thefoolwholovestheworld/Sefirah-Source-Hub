@@ -1373,9 +1373,13 @@ async function detectReviews(org,html,url,alt){
 async function loadReviews(c,path){
  const p=path.replace(/\/+$/,''),slug=p.split('/').pop();let u;
  if(c.rvm=='page')u=c.rvu.replace('{path}',p);
- else if(c.rvm=='json'){u=c.rvu;if(u.includes('{id}')){const f=await getPage(new URL(p,c.base+'/').href),nid=rvIdOf(f.text,c.rvi);if(!nid)return [];u=u.replace('{id}',encodeURIComponent(nid))}u=u.replace('{slug}',slug).replace('{page}','1')}
+ else if(c.rvm=='json'){u=c.rvu;if(u.includes('{id}')){const f=await getPage(new URL(p,c.base+'/').href),nid=rvIdOf(f.text,c.rvi);if(!nid)return [];u=u.replace('{id}',encodeURIComponent(nid))}u=u.replace('{slug}',slug)}
  else{const f=await getPage(new URL(p,c.base+'/').href),id=wpId(f.text);if(!id)return [];u=c.rvu.replace('{id}',id)}
- const r=await getPage(new URL(u,c.base+'/').href);if(r.status>=400)throw new Error('HTTP '+r.status);return rvItems(c,r.text)}
+ const get1=async n=>{const r=await getPage(new URL(u.replace('{page}',n),c.base+'/').href);if(r.status>=400)throw new Error('HTTP '+r.status);return r.text};
+ const t1=await get1(1),all=rvItems(c,t1);
+ if(c.rvm=='json'&&u.includes('{page}')){let more=false;try{more=JSON.parse(t1).hasMore===true}catch{}
+  for(let n=2;more&&n<=6&&all.length<150;n++){const t=await get1(n),it=rvItems(c,t);if(!it.length)break;all.push(...it);try{more=JSON.parse(t).hasMore===true}catch{more=false}}}
+ return all.slice(0,150)}
 // bloc Lua ajouté au .lua quand des avis sont détectés (aucun antislash)
 function reviewsLua(c){return `
 -- ===== Avis (commentaires des lecteurs), détectés par le Hub : mode ${c.rvm} =====
@@ -2371,8 +2375,11 @@ function open(){
      inner=`<div class="ct"><div class="dtop">${cv?`<img class="dcv" referrerpolicy="no-referrer" src="${H(cv)}" alt="">`:`<div class="dcv">${ph(n.name)}</div>`}<div class="dmeta"><div class="dsub">${n.chapters.length} ch</div><div class="dsum">${H(n.summary||'(pas de description)')}</div></div></div><div class="bb" id="pvgo">▶  Commencer la lecture</div><div class="bb">♡ Ajouter aux favoris</div><div class="bb" id="pvref">Actualiser la liste des chapitres</div></div>`;
      post=s=>{s.querySelector('#pvgo').onclick=()=>{if(n.chapters.length){view={k:'read',nov:n,i:0,item:view.item,cp:view.cp,rev:view.rev};draw()}};
       s.querySelector('#pvref').onclick=()=>{view.nov=null;draw()}}}
-    else if(dt=='r'){const rs=view.revs||[];
-     inner=`<div class="ct"><div class="rvl">${rs.length?rs.slice(0,5).map(x=>`<div class="rvi"><b>${H(x.author)}</b>${x.rating?' · '+'★'.repeat(Math.min(5,Math.round(x.rating))):''}<div>${H(x.content)}</div></div>`).join(''):`<div class="empty">${view.revErr?'Avis illisibles ('+H(view.revErr)+')':'Aucun avis pour ce roman.'}</div>`}</div>${rs.length?`<div class="rvn">${rs.length} avis lus (5 affichés)</div>`:''}</div>`}
+    else if(dt=='r'){const rs=view.revs||[],per=4,np=Math.max(1,Math.ceil(rs.length/per)),rp=Math.max(0,Math.min(view.rp||0,np-1));view.rp=rp;
+     inner=rs.length?`<div class="ct col"><div class="rvl" style="flex:1;min-height:0;overflow:hidden">${rs.slice(rp*per,rp*per+per).map(x=>`<div class="rvi"><b>${H(x.author)}</b>${x.rating?' · '+'★'.repeat(Math.min(5,Math.round(x.rating))):''}<div>${H(x.content)}</div></div>`).join('')}</div><div class="pg">${nb('rvf','«',rp==0)}${nb('rvp','‹',rp==0)}<span>${rp+1} / ${np} · ${rs.length} avis</span>${nb('rvn','›',rp>=np-1)}${nb('rvl','»',rp>=np-1)}</div></div>`
+      :`<div class="ct"><div class="rvl"><div class="empty">${view.revErr?'Avis illisibles ('+H(view.revErr)+')':'Aucun avis pour ce roman.'}</div></div></div>`;
+     post=s=>{if(!rs.length)return;const g=q=>()=>{view.rp=q;draw()};
+      s.querySelector('#rvf').onclick=g(0);s.querySelector('#rvp').onclick=g(rp-1);s.querySelector('#rvn').onclick=g(rp+1);s.querySelector('#rvl').onclick=g(np-1)}}
     else if(!n.chapters.length){inner=`<div class="ct">${errBox('Aucun chapitre trouvé.')}</div>`}
     else{
      const chs=view.rev?n.chapters:[...n.chapters].reverse(),R=11,np=Math.max(1,Math.ceil(chs.length/R));
