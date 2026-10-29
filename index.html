@@ -449,7 +449,7 @@ async function probeSearchApi(org,lang){
   if(!b||!b.length||b.join()!=a.join())return g}
  return ''}
 // ---------- créer : une adresse -> IA -> .lua
-const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:'',rvo:'auto',rvm:'',rvu:'',rvc:'',apiList:''});
+const NEWCFG=()=>({rvi:'',name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:'',rvo:'auto',rvm:'',rvu:'',rvc:'',apiList:''});
 let CFG=NEWCFG(),LASTORG='';
 const siteBase=()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}};
 // cfg() : la configuration « propre » utilisée pour générer le .lua et pour les tests (filtres et adresse validés)
@@ -1338,14 +1338,28 @@ function repCls(doc,min){const cnt={};
  doc.querySelectorAll('[class]').forEach(e=>{if(e.textContent.trim().length<25||e.querySelector('form,textarea'))return;
   new Set((e.getAttribute('class')||'').split(/\s+/)).forEach(t=>{if(/^[\w-]{3,40}$/.test(t)&&/(review|comment|avis|critique)/i.test(t)&&!/(form|input|count|title|btn|button|wrap|container|header|reply|respond|add|write|total|tab|nav|menu|section|area|list|star|rating|empty|none|login)/i.test(t))cnt[t]=(cnt[t]||0)+1})});
  const b=Object.entries(cnt).filter(([,n])=>n>=min).sort((a,b)=>b[1]-a[1]||a[0].length-b[0].length);return b[0]?b[0][0]:null}
-async function detectReviews(org,html,url){
+// id interne de l'œuvre (utile aux API d'avis qui n'acceptent pas le slug, ex. /api/comments?novelId=…)
+const RVID={
+ next:h=>{const i=h.indexOf('initialNovel');if(i<0)return null;for(const m of h.slice(i).matchAll(/[^A-Za-z0-9]id[^A-Za-z0-9]+([A-Za-z0-9]+)/g))if(m[1].length>=8&&m[1].length<=40)return m[1];return null},
+ novelId:h=>{for(const m of h.matchAll(/novelId[^A-Za-z0-9]+([A-Za-z0-9]+)/g))if(m[1].length>=8&&m[1].length<=40)return m[1];return null}};
+const rvIdOf=(h,how)=>{const f=RVID[how];return f?f(String(h||'')):null};
+const RVTPL=['/api/comments?novelId={id}&type=REVIEW&page={page}&limit=10&hasRating=true','/api/comments?novelId={id}&type=REVIEW&page={page}&limit=10','/api/novels/{id}/reviews','/api/novels/{id}/comments','/api/reviews?novelId={id}','/api/comments?novelId={id}'];
+async function detectReviews(org,html,url,alt){
  const d=dom(html);let path='';try{path=new URL(url).pathname.replace(/\/+$/,'')}catch{}
  const slug=path.split('/').filter(Boolean).pop()||'',T=async u=>{try{const p=await getPage(u);return p&&!blocked(p)&&p.status<400?p.text:null}catch{return null}};
  const disq=/disqus_thread|disqus\.com\/embed|fb-comments/i.test(html);
  // 1) commentaires WordPress (API REST)
  const id=wpId(html);
  if(id){const u='/wp-json/wp/v2/comments?post={id}&per_page=50',t=await T(org+u.replace('{id}',id)),n=t?rvItems({rvm:'wp'},t).length:0;if(n)return{m:'wp',u,n}}
- // 2) API JSON des avis (adresses courantes)
+ // 2a) API JSON par identifiant interne : l'id est lu dans la fiche (payload Next.js « initialNovel », « novelId »…), puis chaque adresse est testée
+ // (si la 1re œuvre n'a aucun avis, on essaie quelques autres œuvres de l'accueil : une liste vide ne prouve rien)
+ {let pages=[html],more=(alt||[]).slice(0,3),tried=0;
+  while(pages.length&&tried<4){const h=pages.shift();tried++;
+   for(const how of ['next','novelId']){const nid=rvIdOf(h,how);if(!nid)continue;
+    for(const tpl of RVTPL){const t=await T(org+tpl.replace('{id}',encodeURIComponent(nid)).replace('{page}','1')),n=t?rvItems({rvm:'json'},t).length:0;if(n)return{m:'json',u:tpl,n,i:how}}
+    break}
+   if(more.length){const nx=more.shift();const t=await T(nx);if(t)pages.push(t)}}}
+ // 2b) API JSON des avis (adresses courantes, par slug)
  if(slug)for(const u of ['/api/novels/{slug}/comments/','/api/novels/{slug}/comments','/api/novels/{slug}/reviews','/api/novel/{slug}/comments','/api/comments?slug={slug}','/api/reviews?slug={slug}']){
   const t=await T(org+u.replace('{slug}',slug)),n=t?rvItems({rvm:'json'},t).length:0;if(n)return{m:'json',u,n}}
  // 3) avis écrits dans la fiche elle-même, puis sur une page dédiée (/reviews, /avis…)
@@ -1359,7 +1373,7 @@ async function detectReviews(org,html,url){
 async function loadReviews(c,path){
  const p=path.replace(/\/+$/,''),slug=p.split('/').pop();let u;
  if(c.rvm=='page')u=c.rvu.replace('{path}',p);
- else if(c.rvm=='json')u=c.rvu.replace('{slug}',slug);
+ else if(c.rvm=='json'){u=c.rvu;if(u.includes('{id}')){const f=await pg(new URL(p,c.base+'/').href,'novel'),nid=rvIdOf(f.text,c.rvi);if(!nid)return [];u=u.replace('{id}',encodeURIComponent(nid))}u=u.replace('{slug}',slug).replace('{page}','1')}
  else{const f=await pg(new URL(p,c.base+'/').href,'novel'),id=wpId(f.text);if(!id)return [];u=c.rvu.replace('{id}',id)}
  const r=await getPage(new URL(u,c.base+'/').href);if(r.status>=400)throw new Error('HTTP '+r.status);return rvItems(c,r.text)}
 // bloc Lua ajouté au .lua quand des avis sont détectés (aucun antislash)
@@ -1368,6 +1382,7 @@ function reviewsLua(c){return `
 local RV_MODE = "${c.rvm}"
 local RV_URL  = "${ls(c.rvu)}"
 local RV_CLS  = "${ls(c.rvc)}"
+local RV_IDM  = "${ls(c.rvi||'')}"
 local function rv_json(s)
     local ok, J = pcall(require, "rapidjson")
     if not ok then J = require("json") end
@@ -1432,10 +1447,28 @@ local function rv_page(html)
     return out
 end
 
+-- id interne de l'œuvre lu dans la fiche (même règle que le Hub : 8 à 40 caractères alphanumériques)
+local function rv_find_id(fiche)
+    if RV_IDM == "next" then
+        local from = fiche:find("initialNovel", 1, true)
+        if not from then return nil end
+        for cand in fiche:sub(from):gmatch("[^%w]id[^%w]+(%w+)") do
+            if #cand >= 8 and #cand <= 40 then return cand end
+        end
+    elseif RV_IDM == "novelId" then
+        for cand in fiche:gmatch("novelId[^%w]+(%w+)") do
+            if #cand >= 8 and #cand <= 40 then return cand end
+        end
+    end
+    return nil
+end
+
 function ext:parseReviews(path, page, sort)
-    if (page or 1) > 1 then return { reviews = {}, has_more = false } end
+    local pg = page or 1
+    if pg > 1 and not RV_URL:find("{page}", 1, true) then return { reviews = {}, has_more = false } end
     local p = path:gsub("/+$", "")
     local items = {}
+    local more = false
     if RV_MODE == "page" then
         local html = get((RV_URL:gsub("{path}", function() return p end)))
         if not html then return { reviews = {}, has_more = false, error = true } end
@@ -1449,12 +1482,21 @@ function ext:parseReviews(path, page, sort)
             u = (RV_URL:gsub("{id}", id))
         else
             local slug = p:match("([^/]+)$") or ""
-            u = (RV_URL:gsub("{slug}", function() return slug end))
+            u = RV_URL
+            if u:find("{id}", 1, true) then
+                local fiche = get(p)
+                local nid = fiche and rv_find_id(fiche)
+                if not nid then return { reviews = {}, has_more = false } end
+                u = (u:gsub("{id}", function() return nid end))
+            end
+            u = (u:gsub("{slug}", function() return slug end))
+            u = (u:gsub("{page}", function() return tostring(pg) end))
         end
         local body = get(u)
         local data = body and rv_json(body)
         if not data then return { reviews = {}, has_more = false, error = true } end
         local list = data
+        if data.hasMore == true then more = true end
         for _, k in ipairs({ "comments", "reviews", "results", "data", "items" }) do
             if type(data[k]) == "table" then list = data[k]; break end
         end
@@ -1472,7 +1514,7 @@ function ext:parseReviews(path, page, sort)
             return false
         end)
     end
-    return { reviews = items, has_more = false }
+    return { reviews = items, has_more = more }
 end
 `}
 
@@ -1551,7 +1593,7 @@ async function runTests(c){
   const og=fd.querySelector('meta[property="og:description"]')?.content||'';
   /(\.\.\.|…)\s*$/.test(og)&&add('w','Fiche : description tronquée dans og:description (le .lua cherche la version complète)');
   /&#x?[0-9a-f]+;/i.test(f.text)&&add('ok','Fiche : entités HTML numériques (&#x27;…) présentes, décodées par le .lua généré');
-  if(c.rvo!='off'){const rv=await detectReviews(base,f.text,abs(first));CFG.rvm=rv.m;CFG.rvu=rv.u||'';CFG.rvc=rv.c||'';
+  if(c.rvo!='off'){const rv=await detectReviews(base,f.text,abs(first),Array.from(h||[]).slice(0,5).map(a=>{try{return abs(a.getAttribute('href'))}catch{return ''}}).filter(u=>u&&u!=abs(first)));CFG.rvm=rv.m;CFG.rvu=rv.u||'';CFG.rvc=rv.c||'';CFG.rvi=rv.i||'';
    rv.m=='wp'?add('ok','Avis : '+rv.n+' commentaire(s) lus par l\'API WordPress : l\'onglet Avis sera actif'):
    rv.m=='json'?add('ok','Avis : '+rv.n+' avis lus par l\'API '+rv.u+' : l\'onglet Avis sera actif'):
    rv.m=='page'?add('ok','Avis : '+rv.n+' avis repérés ('+(rv.u=='{path}'?'dans la fiche':rv.u)+', classe « '+rv.c+' ») : l\'onglet Avis sera actif'):
