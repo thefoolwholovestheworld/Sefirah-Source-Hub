@@ -1373,8 +1373,8 @@ async function detectReviews(org,html,url,alt){
 async function loadReviews(c,path){
  const p=path.replace(/\/+$/,''),slug=p.split('/').pop();let u;
  if(c.rvm=='page')u=c.rvu.replace('{path}',p);
- else if(c.rvm=='json'){u=c.rvu;if(u.includes('{id}')){const f=await pg(new URL(p,c.base+'/').href,'novel'),nid=rvIdOf(f.text,c.rvi);if(!nid)return [];u=u.replace('{id}',encodeURIComponent(nid))}u=u.replace('{slug}',slug).replace('{page}','1')}
- else{const f=await pg(new URL(p,c.base+'/').href,'novel'),id=wpId(f.text);if(!id)return [];u=c.rvu.replace('{id}',id)}
+ else if(c.rvm=='json'){u=c.rvu;if(u.includes('{id}')){const f=await getPage(new URL(p,c.base+'/').href),nid=rvIdOf(f.text,c.rvi);if(!nid)return [];u=u.replace('{id}',encodeURIComponent(nid))}u=u.replace('{slug}',slug).replace('{page}','1')}
+ else{const f=await getPage(new URL(p,c.base+'/').href),id=wpId(f.text);if(!id)return [];u=c.rvu.replace('{id}',id)}
  const r=await getPage(new URL(u,c.base+'/').href);if(r.status>=400)throw new Error('HTTP '+r.status);return rvItems(c,r.text)}
 // bloc Lua ajouté au .lua quand des avis sont détectés (aucun antislash)
 function reviewsLua(c){return `
