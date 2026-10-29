@@ -449,11 +449,11 @@ async function probeSearchApi(org,lang){
   if(!b||!b.length||b.join()!=a.join())return g}
  return ''}
 // ---------- créer : une adresse -> IA -> .lua
-const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',browseApi:false,engine:''});
+const NEWCFG=()=>({name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:'',rvo:'auto',rvm:'',rvu:'',rvc:'',apiList:''});
 let CFG=NEWCFG();
 const siteBase=()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}};
 // cfg() : la configuration « propre » utilisée pour générer le .lua et pour les tests (filtres et adresse validés)
-const cfg=()=>{const base=siteBase();return {...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,browseApi:!!CFG.browseApi&&/^https?:\/\/[^\/]+\/(?:[^?#]*\/)?api\//i.test(chkBrowse(CFG.browse,base).ok)}};
+const cfg=()=>{const base=siteBase();return {...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,apiList:chkBrowse(CFG.apiList,base).ok,rvm:CFG.rvo=='off'||!['wp','json','page'].includes(CFG.rvm)?'':CFG.rvm,rvu:sf(CFG.rvu,120),rvc:tok(CFG.rvc)?CFG.rvc:''}};
 function applyCfg(o){
  if(!o||typeof o!='object')return;
  if(o.type=='novel'||o.type=='manga')CFG.type=o.type;
@@ -562,66 +562,11 @@ function detectFilters(d,org,pageUrl){
  Object.values(pg).filter(e=>e.vals.size>=3).sort((a,b)=>b.vals.size-a.vals.size).forEach(e=>
   mk(e.word,humanize(e.word),[...e.vals].map(([id,label])=>({id,label})),false,{param:'',sel:'',style:'path',word:e.word,base:''}));
  return {list,browse:makeBrowse(list)}}
-// ---- détection des filtres d'un site à API JSON (ex. /api/novels) : listes de genres / statuts lues dans l'API,
-// puis VÉRIFIÉES par une vraie requête (un paramètre ignoré par le site ne change pas le résultat => refusé)
-async function probeApiFilters(org,apis){
- const none={list:[],browse:'',note:''},A=(apis||[]).find(a=>a.id=='api'&&a.url);if(!A)return none;
- let u0;try{u0=new URL(A.url)}catch{return none}if(u0.origin!=org)return none;
- const base=u0.origin+u0.pathname;
- const J=async u=>{try{const p=await getPage(u);if(!p||blocked(p)||p.status>=400)return null;return JSON.parse(p.text)}catch{return null}};
- const arrOf=j=>{if(Array.isArray(j))return j;if(!j||typeof j!='object')return null;
-  for(const k of['data','results','items','novels','series','list']){if(Array.isArray(j[k]))return j[k];if(j[k]&&typeof j[k]=='object'&&Array.isArray(j[k].items))return j[k].items}return null};
- const sig=a=>a.slice(0,12).map(n=>n&&typeof n=='object'?String(n.slug||n.id||n.title||n.name||''):String(n)).join('|');
- const b1=await J(base),a1=arrOf(b1);if(!a1||a1.length<2)return none;
- const s1=sig(a1),b2=await J(base),a2=arrOf(b2);
- if(!a2||sig(a2)!=s1)return{...none,note:'les résultats de l\'API changent à chaque requête : filtres non vérifiables'};
- const enc=encodeURIComponent,changed=j=>{const a=arrOf(j);return !!a&&a.length>0&&sig(a)!=s1};
- // page 2 : si ?page=2 ne change rien, la pagination n'est pas en « page » (ex. skip/take) : on le dit
- const pj=await J(base+'?page=2'),pg=changed(pj);
- const optOf=n=>{if(typeof n=='string'||typeof n=='number')return{id:sid(n),label:sf(n,40)};
-  if(!n||typeof n!='object')return null;
-  const id=n.slug??n.value??n.id??n.name??n.title,lb=n.name??n.title??n.label??n.slug;
-  if(id==null||typeof id=='object')return null;return{id:sid(id),label:sf(lb??id,40)}};
- const optsOf=a=>{const seen=new Set(),o=[];(a||[]).forEach(n=>{const x=optOf(n);if(x&&x.id&&x.label&&!seen.has(x.id)){seen.add(x.id);o.push(x)}});return o.slice(0,60)};
- const sing=w=>w.replace(/ies$/,'y').replace(/s$/,'');
- const cand=[];  // {name, options, from}
- const addCand=(name,opts,from,min)=>{const k=skey(name);if(!k||SKIPN.test(k)||opts.length<(min||3)||cand.some(c=>c.name==k))return;cand.push({name:k,options:opts,from})};
- // a) listes dédiées : /api/genres, /api/tags… (ou un objet {genres:[…],status:[…]})
- await Promise.all(['/api/genres','/api/tags','/api/categories','/api/novels/genres','/api/filters'].map(async path=>{
-  const j=await J(org+path);if(!j)return;
-  const own=arrOf(j);if(own&&(Array.isArray(j)||Object.keys(j).length<=3)){addCand(sing(path.split('/').pop()),optsOf(own),path);return}
-  Object.entries(j).forEach(([k,v])=>{if(Array.isArray(v))addCand(sing(k),optsOf(v),path)})}));
- // b) champs à choix limités vus dans les œuvres de la liste (status, type…) et genres portés par chaque œuvre
- const SKIPF=/^(id|_id|slug|title|name|description|summary|synopsis|author|authors|cover.*|image.*|thumbnail|url|link|created.*|updated.*|published.*|date.*|.*(count|views|rating|score|chapters?|likes|total).*)$/i;
- const vals={},arr={};
- a1.forEach(n=>{if(!n||typeof n!='object')return;Object.entries(n).forEach(([k,v])=>{if(SKIPF.test(k))return;
-  if(typeof v=='string'&&v.length<=24&&!/[\/:]/.test(v)){(vals[k]=vals[k]||new Map()).set(v,(vals[k].get(v)||0)+1)}
-  else if(Array.isArray(v)&&v.length){const o=optsOf(v);if(o.length){const m=arr[k]=arr[k]||new Map();o.forEach(x=>{if(!m.has(x.id))m.set(x.id,x.label)})}}})});
- if(a1.length>=8)Object.entries(vals).forEach(([k,m])=>{if(m.size>=2&&m.size<=10)addCand(k,[...m.keys()].map(v=>({id:sid(v),label:sf(humanize(v.toLowerCase()),40)})),'champ '+k,2)});
- Object.entries(arr).forEach(([k,m])=>{if(m.size>=3)addCand(sing(k),[...m].map(([id,label])=>({id,label})),'champ '+k)});
- // c) vérification : chaque candidat doit changer réellement le résultat de l'API
- const names=k=>{const b=sing(k),o=[k,b,b+'s',b+'Id',b+'_id',b+'Slug'];if(/genre|tag|categor/i.test(k))o.push('category','genre','genres','tags');return[...new Set(o)].slice(0,7)};
- const out=[];
- await Promise.all(cand.slice(0,6).map(async c=>{
-  const v=c.options[0].id;
-  for(const prm of names(c.name)){
-   if(SKIPN.test(skey(prm)))continue;
-   const r=await J(base+'?'+prm+'='+enc(v));
-   if(changed(r)){out.push({c,prm});return}}}));
- const used=new Set(),list=[];
- out.sort((x,y)=>cand.indexOf(x.c)-cand.indexOf(y.c)).forEach(({c,prm})=>{
-  if(used.has(prm))return;used.add(prm);
-  const def={key:c.name,label:humanize(c.name),def:'all',multi:false,where:'browse',join:'rep',
-   options:[{id:'all',label:'Tous'}].concat(c.options),param:prm,style:'query',base,api:true,pg:pg,org,from:c.from};
-  const r=fixFilter({...def,default:'all'});if(!r.ok)return;
-  list.push({...def,...r.ok,def:'all'})});
- const f=list.slice(0,8);
- return{list:f,browse:makeBrowse(f),note:f.length?(pg?'':'pagination non reconnue (pas de ?page=) : seule la 1re page sera chargée'):'aucun filtre de l\'API n\'a pu être vérifié'}}
 // adresse de liste proposée pour un groupe de filtres détectés (la page 2 s'écrit {page} : à vérifier sur le site)
 function makeBrowse(list){const f=(list||[]).find(x=>x.style);if(!f)return '';
  if(f.style=='path')return f.org+'/'+f.word+'/{'+f.key+'}/';
  const g=list.filter(x=>x.style=='query'&&x.base==f.base&&x.param);
- return f.base+'?'+g.map(x=>x.param+'={'+x.key+'}').join('&')+(f.pg===false?'':'&page={page}')}
+ return f.base+'?'+g.map(x=>x.param+'={'+x.key+'}').join('&')+'&page={page}'}
 // « Applique un filtre sur le site, copie l'adresse, colle-la ici » : remplace la valeur par {genre}, {page}…
 function templatize(u,pool){let x;try{x=new URL(u)}catch{return null}
  if(!/^https?:$/.test(x.protocol))return null;
@@ -635,10 +580,14 @@ function templatize(u,pool){let x;try{x=new URL(u)}catch{return null}
    if(PGP.test(n)&&/^\d+$/.test(v))return n+'={page}';
    if(NOQ.test(skey(n)))return seg;
    let f=byName(n);
-   if(f){if(v&&v!='all'&&!ids(f).includes(v))f.options=(f.options||[]).concat([{id:sid(v),label:sf(v,40)}]);use(f);return n+'={'+f.key+'}'}
+   if(f){const vs=v.includes(',')?v.split(',').map(x=>x.trim()).filter(Boolean):[v];
+    if(vs.length>1){f.multi=true;f.join='comma'}
+    vs.forEach(x=>{if(x&&x!='all'&&!ids(f).some(i=>i.toLowerCase()==x.toLowerCase()))f.options=(f.options||[]).concat([{id:sid(x),label:/^(1|true|yes|on)$/i.test(x)?'Oui':sf(x,40)}])});
+    use(f);return n+'={'+f.key+'}'}
    f=free(v);if(f){use(f);return n+'={'+f.key+'}'}
    if(v&&v!='all'&&v.length<=40&&pool.length+made.length<8){let k=skey(n)||'filtre',b=k.slice(0,27),c=2;while(pool.concat(made).some(y=>y.key==k))k=b+c++;
-    const nf={key:k,label:humanize(skey(n))||k,def:'all',multi:false,where:'both',join:'rep',param:n,options:[{id:'all',label:'Tous'},{id:sid(v),label:sf(v,40)}]};made.push(nf);use(nf);return n+'={'+k+'}'}
+    const vs=v.includes(',')?v.split(',').map(x=>x.trim()).filter(Boolean):[v],mu=vs.length>1;
+    const nf={key:k,label:humanize(skey(n))||k,def:'all',multi:mu,where:'both',join:mu?'comma':'rep',param:n,options:(mu?[]:[{id:'all',label:'Tous'}]).concat(vs.map(x=>({id:sid(x),label:/^(1|true|yes|on)$/i.test(x)?'Oui':sf(x,40)})))};made.push(nf);use(nf);return n+'={'+k+'}'}
    return seg}):[];
  const segs=x.pathname.split('/').map((s,i,a)=>{const v=dd(s);
   if(/^\d+$/.test(v)&&a[i-1]&&/^(page|pages|p)$/i.test(a[i-1]))return '{page}';
@@ -941,36 +890,8 @@ local function browse_url(page, options)
 end
 
 `}
-// ---------- liste par API JSON : bloc Lua ajouté quand l'adresse de liste renvoie du JSON (aucun antislash)
-function apiListLua(c){return `-- ===== LISTE PAR API JSON : l'adresse de liste renvoie du JSON et non du HTML =====
-local function jl_decode(str)
-    local ok_j, J = pcall(require, "rapidjson")
-    if not ok_j then J = require("json") end
-    local ok, d = pcall(J.decode, str)
-    if ok then return d end
-    return nil
-end
-local function parse_json_list(body)
-    local data = jl_decode(body)
-    if type(data) ~= "table" then return {} end
-    if not data[1] then data = data.novels or data.results or data.items or data.data or data end
-    local out, seen = {}, {}
-    for _, n in ipairs(data) do
-        if type(n) == "table" and type(n.slug) == "string" and not seen[n.slug] then
-            seen[n.slug] = true
-            local cv
-            for _, k in ipairs({ "coverImage", "cover", "coverUrl", "image", "thumbnail" }) do
-                if type(n[k]) == "string" and n[k] ~= "" then cv = n[k]; break end
-            end
-            out[#out + 1] = { name = dec(tostring(n.title or n.name or n.slug)), path = LISTP:gsub("/+$", "") .. "/" .. n.slug, cover = abs(cv) }
-        end
-    end
-    return out
-end
-
-`}
 function genLua(c){const id=c.name.toLowerCase().replace(/[^a-z0-9]/g,'')||'source',man=c.type=='manga',nx=!!c.next&&c.type!='manga';
-const fl=c.filters||[],fx=fl.length>0||!!c.browse,jb=!!c.browseApi&&!!c.browse,popF=fl.filter(f=>f.where!='search'),seaF=fl.filter(f=>f.where!='browse');
+const fl=c.filters||[],fx=fl.length>0||!!c.browse,popF=fl.filter(f=>f.where!='search'),seaF=fl.filter(f=>f.where!='browse');
 return {id,code:`-- ${c.name} — source générée par Sefirah Source Hub (modèle sans IA). À relire et tester.
 -- Contrat : voir extensions/mangapill.lua du plugin Sefirah.
 local logger = require("logger")
@@ -1116,13 +1037,13 @@ local function parse_list(html)
     return res
 end
 
-${fx?filtersLua(c):''}${jb?apiListLua(c):''}local ext = { id = "${id}", name = "${ls(c.name)}", site = BASE, lang = "${ls(c.lang)}", version = "${ls(c.ver)}",${man?'\n    type = "manga",':''}
-    popularFilters = ${popF.length?'POPULAR_FILTERS':'{}'}, searchFilters = ${seaF.length?'SEARCH_FILTERS':'{}'}, hasReviews = false, chapterCommentsPanel = false }
+${fx?filtersLua(c):''}local ext = { id = "${id}", name = "${ls(c.name)}", site = BASE, lang = "${ls(c.lang)}", version = "${ls(c.ver)}",${man?'\n    type = "manga",':''}
+    popularFilters = ${popF.length?'POPULAR_FILTERS':'{}'}, searchFilters = ${seaF.length?'SEARCH_FILTERS':'{}'}, hasReviews = ${c.rvm?'true':'false'},${c.rvm?' maxReviews = 150,':''} chapterCommentsPanel = false }
 
 function ext:popularNovels(page${fx?', options':''})
-${jb?'    if page and page > 1 and not BROWSE:find("{page}", 1, true) then return { novels = {} } end\n':''}    local html, err = get(${fx?'browse_url(page, options)':'BASE .. "/"'})
+    local html, err = get(${fx?'browse_url(page, options)':'BASE .. "/"'})
     if not html then return { novels = {}, error = "Site injoignable (" .. tostring(err) .. ")" } end
-    return { novels = ${jb?'parse_json_list(html)':'parse_list(html)'} }
+    return { novels = parse_list(html) }
 end
 
 function ext:searchNovels(term, page${fx?', options':''})
@@ -1220,7 +1141,7 @@ function ext:parseChapter(path)
     if not body or #body < 50 then return "<p>Texte du chapitre introuvable (classe « " .. CONT .. " »).</p>" end
     return body
 end
-`}${nx?nextLua(c):''}${c.engine=='madara'?madaraLua(c,fx,man):c.engine=='wpjson'?wpjsonLua(c):''}
+`}${nx?nextLua(c):''}${c.engine=='madara'?madaraLua(c,fx,man):c.engine=='wpjson'?wpjsonLua(c):''}${c.apiList&&c.browse?listApiLua(c):''}${c.rvm?reviewsLua(c):''}
 return ext
 `,meta:`{ id = "${id}", name = "${ls(c.name)}", site = "${ls(c.base)}", lang = "${ls(c.lang)}", version = "${ls(c.ver)}", runtime = "lua"${man?', type = "manga"':''} },`}}
 const PXB=()=>PROXY;
@@ -1244,7 +1165,7 @@ function applyAiFilters(o){
    if(typeof o.browse=='string'){const cb=chkBrowse(o.browse,siteBase()).ok;
     if(cb&&[...cb.matchAll(/\{([\w-]+)\}/g)].every(m=>keys.has(m[1]))&&ok.some(f=>cb.includes('{'+f.key+'}')))b=cb}
    if(!b)b=makeBrowse(DET.list.filter(f=>ok.some(x=>x.key==f.key)));
-   if(b){CFG.browse=chkBrowse(b,siteBase()).ok;CFG.browseApi=!!DET.list.find(d=>d.api&&d.base&&CFG.browse.startsWith(d.base)&&ok.some(x=>x.key==d.key))}}}}
+   if(b)CFG.browse=chkBrowse(b,siteBase()).ok}}}
 const tok=s=>typeof s=='string'&&/^[\w-]{1,60}$/.test(s);
 const cls1=e=>(e.getAttribute('class')||'').split(/\s+/).filter(Boolean)[0]||'';
 // meilleure classe d'un élément : celle qui ressemble à « contenu / chapitre / texte », sinon la première classe simple
@@ -1349,6 +1270,212 @@ function discoverList(nov,pref){if(pref&&Array.isArray(nov[pref]))return pref;
  return Object.keys(nov).find(f=>/chap|episode|volume/i.test(f)&&ok(f))||Object.keys(nov).find(f=>!/genre|tag|categor|author|label|theme/i.test(f)&&ok(f))||null}
 
 // tests réels (réseau) d'une configuration -> liste de [ok|w|e|s, message]
+// ---------- liste filtrée par API JSON (sites Next.js : le HTML de /browse ne contient pas les résultats filtrés)
+const listApiArr=j=>Array.isArray(j)?j:(j&&(j.novels||j.data||j.results||j.items||j.series||j.list));
+const apiSlugs=async u=>{try{const p=await getPage(u);if(blocked(p)||p.status>=400)return null;const a=listApiArr(JSON.parse(p.text));return Array.isArray(a)?a.filter(n=>n&&typeof n.slug=='string').map(n=>n.slug):null}catch{return null}};
+async function probeListApi(base,tpl,selF,selD,J){
+ const m=tpl.match(/^(https?:\/\/[^\/?]+)(\/[^?]*)?(\?.*)?$/);if(!m)return null;
+ const q=m[3]||'',pth=(m[2]||'').replace(/\/+$/,'');
+ const cands=[...new Set([pth?base+'/api'+pth+q:'',base+'/api/novels'+q,base+'/api/novels/browse'+q,base+'/api/browse'+q,base+'/api/series'+q].filter(Boolean))];
+ for(const t of cands){const a=await apiSlugs(expandUrl(t,selF,'',1,J));if(!a||!a.length)continue;
+  const b=await apiSlugs(expandUrl(t,selD,'',1,J));if(b&&b.length&&b.join()==a.join())continue;   // le filtre ne change rien : ce n'est pas la bonne API
+  return{tpl:t,n:a.length}}
+ return null}
+// bloc Lua : la liste filtrée est lue par API JSON (aucun antislash)
+function listApiLua(c){return `
+-- ===== Liste filtrée par API JSON (le HTML de la page de liste ne contient pas les résultats) =====
+local LISTAPI = "${ls(c.apiList)}"
+local function la_json(s)
+    local ok, J = pcall(require, "rapidjson")
+    if not ok then J = require("json") end
+    local ok2, v = pcall(J.decode, s)
+    if ok2 and type(v) == "table" then return v end
+    return nil
+end
+function ext:popularNovels(page, options)
+    local body, err = get(expand(LISTAPI, options and options.filters, "", page))
+    if not body then return { novels = {}, error = "Site injoignable (" .. tostring(err) .. ")" } end
+    local data = la_json(body)
+    if type(data) ~= "table" then return { novels = {}, error = "Réponse de l'API illisible" } end
+    local list = data
+    if not data[1] then
+        for _, k in ipairs({ "novels", "data", "results", "items", "series", "list" }) do
+            if type(data[k]) == "table" then list = data[k]; break end
+        end
+    end
+    local root = (LISTP:gsub("/+$", ""))
+    local out, seen = {}, {}
+    for _, n in ipairs(list) do
+        if type(n) == "table" and type(n.slug) == "string" and not seen[n.slug] then
+            seen[n.slug] = true
+            local cv
+            for _, k in ipairs({ "coverImage", "cover", "coverUrl", "image", "thumbnail" }) do
+                if type(n[k]) == "string" and n[k] ~= "" then cv = abs(n[k]); break end
+            end
+            local nm = type(n.title) == "string" and n.title or type(n.name) == "string" and n.name or n.slug
+            out[#out + 1] = { name = dec(nm), path = root .. "/" .. n.slug, cover = cv }
+        end
+    end
+    return { novels = out }
+end
+`}
+// ---------- AVIS : détection (API WordPress, API JSON, page HTML) + lecture + bloc Lua parseReviews
+function rvItems(c,text){
+ const pick=(o,ks)=>{if(!o||typeof o!='object')return '';for(const k of ks){let v=o[k];if(v&&typeof v=='object')v=v.rendered;if((typeof v=='string'||typeof v=='number')&&String(v).trim())return String(v)}return ''};
+ const plain=h=>(dom(String(h||'')).body.textContent||'').replace(/\s+/g,' ').trim();
+ if(c.rvm=='page'){const d=dom(text),q='[class*="'+c.rvc+'"]';
+  return [...d.querySelectorAll(q)].filter(e=>!e.parentElement||!e.parentElement.closest(q)).map(e=>{
+   const w=e.querySelector('[class*=author],[class*=user],[class*=name]'),t=e.querySelector('[class*=content],[class*=text]');
+   return{author:w?w.textContent.trim().replace(/\s+/g,' '):'Anonyme',content:plain((t||e).innerHTML),date:((e.querySelector('time')||{}).textContent||'').trim()}}).filter(x=>x.content.length>2).slice(0,150)}
+ let j;try{j=JSON.parse(text)}catch{return []}
+ let l=Array.isArray(j)?j:null;if(!l&&j)for(const k of ['comments','reviews','results','data','items'])if(Array.isArray(j[k])){l=j[k];break}
+ return (l||[]).filter(x=>x&&typeof x=='object').map(x=>{const a=x.author;
+  return{author:(a&&typeof a=='object'?pick(a,['username','name','display_name']):pick(x,['author']))||pick(x,['author_name','username','user_name','name'])||pick(x.user,['username','name'])||'Anonyme',
+   content:plain(pick(x,['content','body','text','comment','message'])),date:pick(x,['date','createdAt','created_at','publishedAt']),rating:+x.rating||0}}).filter(x=>x.content.length>2).slice(0,150)}
+const wpId=h=>(h.match(/[?&]p=(\d+)(?!\d)/)||h.match(/\bpostid-(\d+)/)||h.match(/data-post-id=.(\d+)/)||h.match(/wp-json\/wp\/v2\/[\w-]+\/(\d+)/)||[])[1];
+// classe CSS qui se répète sur chaque avis (ex. « comment-body ») : la plus fréquente, hors boutons / formulaires / conteneurs
+function repCls(doc,min){const cnt={};
+ doc.querySelectorAll('[class]').forEach(e=>{if(e.textContent.trim().length<25||e.querySelector('form,textarea'))return;
+  new Set((e.getAttribute('class')||'').split(/\s+/)).forEach(t=>{if(/^[\w-]{3,40}$/.test(t)&&/(review|comment|avis|critique)/i.test(t)&&!/(form|input|count|title|btn|button|wrap|container|header|reply|respond|add|write|total|tab|nav|menu|section|area|list|star|rating|empty|none|login)/i.test(t))cnt[t]=(cnt[t]||0)+1})});
+ const b=Object.entries(cnt).filter(([,n])=>n>=min).sort((a,b)=>b[1]-a[1]||a[0].length-b[0].length);return b[0]?b[0][0]:null}
+async function detectReviews(org,html,url){
+ const d=dom(html);let path='';try{path=new URL(url).pathname.replace(/\/+$/,'')}catch{}
+ const slug=path.split('/').filter(Boolean).pop()||'',T=async u=>{try{const p=await getPage(u);return p&&!blocked(p)&&p.status<400?p.text:null}catch{return null}};
+ const disq=/disqus_thread|disqus\.com\/embed|fb-comments/i.test(html);
+ // 1) commentaires WordPress (API REST)
+ const id=wpId(html);
+ if(id){const u='/wp-json/wp/v2/comments?post={id}&per_page=50',t=await T(org+u.replace('{id}',id)),n=t?rvItems({rvm:'wp'},t).length:0;if(n)return{m:'wp',u,n}}
+ // 2) API JSON des avis (adresses courantes)
+ if(slug)for(const u of ['/api/novels/{slug}/comments/','/api/novels/{slug}/comments','/api/novels/{slug}/reviews','/api/novel/{slug}/comments','/api/comments?slug={slug}','/api/reviews?slug={slug}']){
+  const t=await T(org+u.replace('{slug}',slug)),n=t?rvItems({rvm:'json'},t).length:0;if(n)return{m:'json',u,n}}
+ // 3) avis écrits dans la fiche elle-même, puis sur une page dédiée (/reviews, /avis…)
+ const c0=repCls(d,2),n0=c0?rvItems({rvm:'page',rvc:c0},html).length:0;if(n0>=2)return{m:'page',u:'{path}',c:c0,n:n0};
+ const pr=new Set();
+ d.querySelectorAll('a[href]').forEach(a=>{try{const x=new URL(a.getAttribute('href'),org+'/');if(x.origin==org&&/(review|avis|critique|comment)/i.test(x.pathname)&&!/login|register|wp-admin|feed/i.test(x.pathname))pr.add(x.pathname+x.search)}catch{}});
+ ['/reviews','/avis','/comments'].forEach(s=>pr.add(path+s));
+ for(const u of [...pr].slice(0,5)){const t=await T(org+u);if(!t)continue;const c1=repCls(dom(t),1),n=c1?rvItems({rvm:'page',rvc:c1},t).length:0;
+  if(n)return{m:'page',u:(u==path||u.startsWith(path+'/'))?'{path}'+u.slice(path.length):u,c:c1,n}}
+ return{m:'',disq}}
+async function loadReviews(c,path){
+ const p=path.replace(/\/+$/,''),slug=p.split('/').pop();let u;
+ if(c.rvm=='page')u=c.rvu.replace('{path}',p);
+ else if(c.rvm=='json')u=c.rvu.replace('{slug}',slug);
+ else{const f=await pg(new URL(p,c.base+'/').href,'novel'),id=wpId(f.text);if(!id)return [];u=c.rvu.replace('{id}',id)}
+ const r=await getPage(new URL(u,c.base+'/').href);if(r.status>=400)throw new Error('HTTP '+r.status);return rvItems(c,r.text)}
+// bloc Lua ajouté au .lua quand des avis sont détectés (aucun antislash)
+function reviewsLua(c){return `
+-- ===== Avis (commentaires des lecteurs), détectés par le Hub : mode ${c.rvm} =====
+local RV_MODE = "${c.rvm}"
+local RV_URL  = "${ls(c.rvu)}"
+local RV_CLS  = "${ls(c.rvc)}"
+local function rv_json(s)
+    local ok, J = pcall(require, "rapidjson")
+    if not ok then J = require("json") end
+    local ok2, v = pcall(J.decode, s)
+    if ok2 and type(v) == "table" then return v end
+    return nil
+end
+local function rv_s(v)
+    if type(v) == "table" and v.rendered then v = v.rendered end
+    if type(v) == "string" or type(v) == "number" then
+        local t = tostring(v)
+        if t:match("%S") then return t end
+    end
+    return nil
+end
+local function rv_pick(o, keys)
+    if type(o) ~= "table" then return nil end
+    for _, k in ipairs(keys) do
+        local t = rv_s(o[k])
+        if t then return t end
+    end
+    return nil
+end
+local function rv_item(c)
+    if type(c) ~= "table" then return nil end
+    local body = rv_pick(c, { "content", "body", "text", "comment", "message" })
+    body = body and para(body)
+    if not body or #body < 2 then return nil end
+    local a = c.author
+    local name = type(a) == "table" and rv_pick(a, { "username", "name", "display_name" }) or rv_s(a)
+    name = name or rv_pick(c, { "author_name", "username", "user_name", "name" }) or rv_pick(c.user, { "username", "name" })
+    local av = type(a) == "table" and rv_pick(a, { "avatar", "avatar_url" }) or nil
+    if not av and type(c.author_avatar_urls) == "table" then av = rv_s(c.author_avatar_urls["96"]) or rv_s(c.author_avatar_urls["48"]) end
+    local re = type(c.reactions) == "table" and c.reactions or {}
+    return { id = rv_pick(c, { "id" }), author = name or "Anonyme", content = body,
+        avatar = av and abs(av) or nil, date = rv_pick(c, { "date", "createdAt", "created_at", "publishedAt" }),
+        rating = tonumber(c.rating), likes = tonumber(re.like or c.likes or c.upvotes) or 0,
+        dislikes = tonumber(re.dislike or c.dislikes or c.downvotes) or 0 }
+end
+-- mode page : chaque élément dont la classe contient RV_CLS est un avis
+local function rv_page(html)
+    local out, pos = {}, 1
+    while #out < 150 do
+        local s, e, tn, attrs = html:find("<(%a%w*)(%s[^>]*)>", pos)
+        if not s then break end
+        local cl = attr(attrs, "class")
+        local blk = cl and cl:find(RV_CLS, 1, true) and inner(html, e + 1, tn) or nil
+        if blk and #blk > 25 then
+            local who = blk:match('class="[^"]*author[^"]*"[^>]*>(.-)</') or blk:match('class="[^"]*user[^"]*"[^>]*>(.-)</') or blk:match('class="[^"]*name[^"]*"[^>]*>(.-)</')
+            local what = blk:match('class="[^"]*content[^"]*"[^>]*>(.-)</div>') or blk:match('class="[^"]*text[^"]*"[^>]*>(.-)</div>') or blk
+            what = para(what)
+            local nm = who and txt(who) or ""
+            if #what > 2 then
+                out[#out + 1] = { author = nm ~= "" and nm or "Anonyme", content = what,
+                    date = blk:match('<time[^>]-datetime="([^"]*)"'), likes = 0, dislikes = 0 }
+            end
+            pos = e + #blk + 1
+        else
+            pos = e + 1
+        end
+    end
+    return out
+end
+
+function ext:parseReviews(path, page, sort)
+    if (page or 1) > 1 then return { reviews = {}, has_more = false } end
+    local p = path:gsub("/+$", "")
+    local items = {}
+    if RV_MODE == "page" then
+        local html = get((RV_URL:gsub("{path}", function() return p end)))
+        if not html then return { reviews = {}, has_more = false, error = true } end
+        items = rv_page(html)
+    else
+        local u
+        if RV_MODE == "wp" then
+            local fiche = get(p)
+            local id = fiche and (fiche:match("[?&]p=(%d+)%f[^%d]") or fiche:match("postid%-(%d+)") or fiche:match("data%-post%-id=.(%d+)") or fiche:match("wp%-json/wp/v2/[%w_%-]+/(%d+)"))
+            if not id then return { reviews = {}, has_more = false } end
+            u = (RV_URL:gsub("{id}", id))
+        else
+            local slug = p:match("([^/]+)$") or ""
+            u = (RV_URL:gsub("{slug}", function() return slug end))
+        end
+        local body = get(u)
+        local data = body and rv_json(body)
+        if not data then return { reviews = {}, has_more = false, error = true } end
+        local list = data
+        for _, k in ipairs({ "comments", "reviews", "results", "data", "items" }) do
+            if type(data[k]) == "table" then list = data[k]; break end
+        end
+        for _, c in ipairs(list) do
+            local ok, it = pcall(rv_item, c)
+            if ok and it then items[#items + 1] = it end
+        end
+        table.sort(items, function(a, b)
+            if sort == "mostliked" and a.likes ~= b.likes then return a.likes > b.likes end
+            local x, y = a.date or "", b.date or ""
+            if x ~= y then
+                if sort == "oldest" then return x < y end
+                return x > y
+            end
+            return false
+        end)
+    end
+    return { reviews = items, has_more = false }
+end
+`}
+
 async function runTests(c){
  DBG={};
  const R=[],add=(k,m)=>R.push([k,m]);
@@ -1376,13 +1503,17 @@ async function runTests(c){
   if(!f){add('s','Filtres : aucun choix différent du choix par défaut à tester');return}
   const o=f.options.find(o=>o.id&&o.id!='all'&&o.id!=f.default);sel[f.key]=o.id;
   const url=expandUrl(tpl,sel,term,1,joinOf(fl)),what='« '+f.label+' = '+o.label+' »';
+  if(c.apiList){const a=await apiSlugs(expandUrl(c.apiList,sel,'',1,joinOf(fl)));a&&a.length?add('ok','Filtres : l\'API de liste renvoie '+a.length+' œuvre(s) avec '+what):add('e','Filtres : l\'API de liste ne renvoie rien avec '+what+' : vérifie « Adresse API de la liste »');return}
   try{const p=await getPage(url);
    if(blocked(p)){add('w','Filtres : site protégé (anti-bot), test non fait et non contourné');return}
    if(p.status>=400){add('e','Filtres : la liste filtrée répond HTTP '+p.status+' ('+url+')');return}
-   let n;
-   if(c.browseApi&&bw){let j;try{j=JSON.parse(p.text)}catch{add('e','Filtres : la liste filtrée n\'a pas répondu en JSON ('+url+')');return}n=apiItems(c,j).length}
-   else{const l=links(dom(p.text),list);n=new Set(l.map(a=>normP(a.getAttribute('href')))).size}
-   const u={size:n};
+   const l=links(dom(p.text),list),u=new Set(l.map(a=>normP(a.getAttribute('href'))));
+   // la liste filtrée est vide, ou identique à la liste sans filtre : le site la charge sûrement par une API JSON
+   const sd={};fl.forEach(x=>sd[x.key]=x.default);let same=false;
+   if(u.size){try{const p0=await getPage(expandUrl(tpl,sd,term,1,joinOf(fl))),u0=new Set(links(dom(p0.text),list).map(a=>normP(a.getAttribute('href'))));same=u0.size==u.size&&[...u].every(x=>u0.has(x))}catch{}}
+   if(!u.size||same){const ap=await probeListApi(base,tpl,sel,sd,joinOf(fl));
+    if(ap){CFG.apiList=ap.tpl;add('ok','Filtres : le site charge sa liste par API ('+ap.tpl+') : '+ap.n+' œuvre(s) avec '+what+'. L\'API est utilisée à la place du HTML.');return}
+    same&&add('w','Filtres : avec '+what+', la liste HTML est identique à la liste sans filtre et aucune API n\'a été trouvée. Cherche l\'adresse dans DevTools › Network puis colle-la dans « Adresse API de la liste ».')}
    u.size?add('ok','Filtres : avec '+what+', la liste renvoie '+u.size+' œuvre(s)'):add('e','Filtres : la liste filtrée ne renvoie aucune œuvre avec '+what+' ('+url+')')}
   catch(e){add('e','Filtres : la liste filtrée est injoignable ('+e.message+')')}};
  try{
@@ -1420,6 +1551,11 @@ async function runTests(c){
   const og=fd.querySelector('meta[property="og:description"]')?.content||'';
   /(\.\.\.|…)\s*$/.test(og)&&add('w','Fiche : description tronquée dans og:description (le .lua cherche la version complète)');
   /&#x?[0-9a-f]+;/i.test(f.text)&&add('ok','Fiche : entités HTML numériques (&#x27;…) présentes, décodées par le .lua généré');
+  if(c.rvo!='off'){const rv=await detectReviews(base,f.text,abs(first));CFG.rvm=rv.m;CFG.rvu=rv.u||'';CFG.rvc=rv.c||'';
+   rv.m=='wp'?add('ok','Avis : '+rv.n+' commentaire(s) lus par l\'API WordPress : l\'onglet Avis sera actif'):
+   rv.m=='json'?add('ok','Avis : '+rv.n+' avis lus par l\'API '+rv.u+' : l\'onglet Avis sera actif'):
+   rv.m=='page'?add('ok','Avis : '+rv.n+' avis repérés ('+(rv.u=='{path}'?'dans la fiche':rv.u)+', classe « '+rv.c+' ») : l\'onglet Avis sera actif'):
+   rv.disq?add('w','Avis : la fiche utilise Disqus ou Facebook Comments, que le plugin ne peut pas lire'):add('s','Avis : aucun avis détecté sur ce site')}
   const st=man?'':rscStream(f.text),nextSite=st.length>500,npath=(()=>{try{return new URL(first,base+'/').pathname.replace(/\/+$/,'')}catch{return first}})();
   // mode Next.js : le texte (et parfois les chapitres) viennent du JSON de self.__next_f
   const nm=async chHtml=>{
@@ -1495,13 +1631,13 @@ const stubFilter=()=>{const ks=new Set(readFilters().map(f=>f.key));let k='genre
 // carte « J'ai trouvé ces filtres » : chaque filtre se coche ou se décoche
 const propHtml=()=>{if(!PROP.list.length)return '';
  return `<div class="card" id="pf_card" style="border-color:var(--a)"><b>🔎 J'ai trouvé ces filtres : ${H(PROP.list.map(f=>f.label+' ('+f.options.filter(o=>o.id&&o.id!='all').length+' choix)').join(', '))}</b>
- <span class="hint">Garde ceux que tu veux : décoche les autres. Ils apparaîtront dans le bouton filtre de la liseuse.${PROP.list.some(f=>f.api)?' Ces filtres viennent de l\'API du site et chacun a été testé : le résultat change vraiment quand on le choisit.'+(PROP.list[0].pg===false?' Pagination non reconnue : seule la 1re page sera chargée.':''):''}</span>
+ <span class="hint">Garde ceux que tu veux : décoche les autres. Ils apparaîtront dans le bouton filtre de la liseuse.</span>
  <ul class="todo">${PROP.list.map((f,i)=>`<li><label style="display:flex;gap:8px;margin:0;color:var(--t);font-size:14px"><input type="checkbox" data-pf="${i}" checked><span><b>${H(f.label)}</b> <small>${f.multi?'plusieurs choix possibles':'un seul choix'}</small><br><small>${H(f.options.filter(o=>o.id&&o.id!='all').slice(0,6).map(o=>o.label).join(', '))}…</small></span></label></li>`).join('')}</ul>
  <div class="row"><button class="b" id="pf_ok">✅ Garder les filtres cochés</button><button class="b s" id="pf_no">Ignorer</button></div></div>`};
 
 // affichage du résultat : fichier .lua + tests + réglages modifiables
 function readAdv(){const g=id=>document.getElementById(id);if(!g('a_name'))return;const pe=CFG.engine;const v=id=>g(id).value.trim();
- CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1',next:v('a_next')=='1',nkNovel:v('a_nkn'),nkChap:v('a_nkc'),nkPara:v('a_nkp'),nkText:v('a_nkt'),nkContent:v('a_nkx'),apiChap:v('a_apic'),apiSearch:v('a_apis'),filters:readFilters(),browse:v('a_browse'),engine:g('a_eng')?v('a_eng'):CFG.engine};if(CFG.engine&&CFG.engine!=pe)applyEngine(CFG.engine)}
+ CFG={...CFG,name:v('a_name'),lang:v('a_lang'),type:v('a_type'),search:v('a_search'),list:v('a_list'),chap:v('a_chap'),cont:v('a_cont'),img:v('a_img'),rev:v('a_rev')=='1',next:v('a_next')=='1',nkNovel:v('a_nkn'),nkChap:v('a_nkc'),nkPara:v('a_nkp'),nkText:v('a_nkt'),nkContent:v('a_nkx'),apiChap:v('a_apic'),apiSearch:v('a_apis'),filters:readFilters(),browse:v('a_browse'),rvo:g('a_rvo')?v('a_rvo'):CFG.rvo,apiList:g('a_apil')?v('a_apil'):CFG.apiList,engine:g('a_eng')?v('a_eng'):CFG.engine};if(CFG.engine&&CFG.engine!=pe)applyEngine(CFG.engine)}
 function renderResult(tests,info,openAdv){LASTT=tests;
  const c=cfg(),g=genLua(c),bad=tests.filter(t=>t[0]=='e'),miss=[];
  const lp=info.loop;info={...info,loop:null};const fix=FIXMSG;FIXMSG=[];LASTINFO=info;
@@ -1529,6 +1665,8 @@ function renderResult(tests,info,openAdv){LASTT=tests;
   ${inp('a_search','Adresse d\'une recherche HTML (avec {q} et {page})',c.search,'https://exemple.com/search?q={q}')}
   <div class="row"><div>${inp('a_list','Liens d\'œuvre contiennent',c.list,'/novel/')}</div><div>${inp('a_chap','Liens de chapitre contiennent',c.chap,'/chapter/')}</div></div>
   <div class="row"><div>${inp('a_cont','Classe CSS du texte (roman)',c.cont,'chapter-content')}</div><div>${inp('a_img','Classe CSS des images (manga)',c.img,'page-img')}</div><div><label>Ordre des chapitres</label><select id="a_rev"><option value="0" ${c.rev?'':'selected'}>Tel quel</option><option value="1" ${c.rev?'selected':''}>Inverser</option></select></div></div>
+  <div class="row"><div><label>Avis (commentaires des lecteurs)</label><select id="a_rvo"><option value="auto" ${c.rvo=='off'?'':'selected'}>Détecter automatiquement</option><option value="off" ${c.rvo=='off'?'selected':''}>Pas d'onglet Avis</option></select><span class="hint">${c.rvm?'Détecté : '+({wp:'commentaires WordPress',json:'API JSON',page:'page HTML'}[c.rvm]||c.rvm)+' — '+H(c.rvu):'Aucun avis détecté pour l\'instant.'}</span></div></div>
+  <div class="row"><div>${inp('a_apil','Adresse API de la liste (sites Next.js, facultatif)',c.apiList,'https://site.fr/api/novels?genres={genre}&page={page}')}<span class="hint">À remplir si la liste filtrée est vide dans l'aperçu : le site la charge par une API JSON (DevTools › Network). Même écriture que l'adresse de liste.</span></div></div>
   <div class="row"><div><label>Moteur</label><select id="a_eng"><option value="">Aucun (génération générique)</option>${Object.entries(ENGINES).map(([k,x])=>`<option value="${k}" ${c.engine==k?'selected':''}>${H(x.label)}</option>`).join('')}</select><span class="hint">Changer de moteur réapplique ses réglages (adresses, classes) : vérifie-les ensuite.</span></div></div>
   <p style="margin:12px 0 2px"><b>Filtres</b> <small>(genre, statut, tri… comme sur le site)</small></p>
   <span class="hint">Un filtre = une liste de choix que tu pourras changer sur la liseuse. Exemple : « Genre » avec les choix Action, Romance… Sans filtre, le fichier reste comme avant.</span>
@@ -1578,7 +1716,7 @@ function renderResult(tests,info,openAdv){LASTT=tests;
   out.innerHTML='<span class="ok">✔ Adresse trouvée : '+H(t.tpl)+'</span>'+(t.made.length?'<span class="hint">J\'ai créé le filtre « '+H(t.made.map(f=>f.label).join(', '))+' » avec le choix vu dans l\'adresse : ajoute les autres choix à la main.</span>':'')+(t.tpl.includes('{page}')?'':'<span class="hint">Je n\'ai pas vu de numéro de page : si la liste a plusieurs pages, colle l\'adresse de la page 2.</span>')+'<span class="hint">Clique ensuite sur « Régénérer et tester ».</span>'};
  const pok=$('#pf_ok');
  if(pok){pok.onclick=async()=>{const ks=[...document.querySelectorAll('#pf_card [data-pf]:checked')].map(i=>PROP.list[+i.dataset.pf]);
-   readAdv();CFG.filters=mergeF(CFG.filters,ks);if(!CFG.browse&&ks.length){CFG.browse=makeBrowse(ks);CFG.browseApi=ks.some(f=>f.api)}PROP={list:[],browse:''};
+   readAdv();CFG.filters=mergeF(CFG.filters,ks);if(!CFG.browse&&ks.length)CFG.browse=makeBrowse(ks);PROP={list:[],browse:''};
    pok.disabled=true;pok.textContent='Test en cours…';renderResult(await runTests(cfg()),info,true)};
   $('#pf_no').onclick=()=>{PROP={list:[],browse:''};$('#pf_card').remove()}}
  if(fix.length)$('#cout').scrollIntoView({behavior:'smooth'});
@@ -1604,9 +1742,7 @@ async function generate(){
   const eng=detectEngine(hp.text)||(apis.some(a=>a.id=='wpjson')?'wpjson':'');
   const hl=lnk(hd,org),lp0=CFG.list;
   // filtres vus sur l'accueil (selects, cases, liens répétés) : proposés à l'utilisateur, jamais ajoutés sans son choix (hors IA)
-  try{DET=detectFilters(hd,org,u)}catch{}
-  if(!DET.list.length&&apis.some(a=>a.id=='api')){say("Recherche des filtres de l'API…");try{const af=await probeApiFilters(org,apis);if(af.list.length)DET=af}catch{}}
-  PROP={list:DET.list.slice(),browse:DET.browse};
+  try{DET=detectFilters(hd,org,u);PROP={list:DET.list.slice(),browse:DET.browse}}catch{}
   const S={site:org,apis:apis.map(a=>({type:a.id,url:a.url,note:a.note})),accueil:{formulaires:[...hd.querySelectorAll('form')].slice(0,3).map(f=>f.outerHTML.replace(/\s+/g,' ').slice(0,500)),liens:hl.slice(0,30),filtres:DET.list.map(f=>({key:f.key,label:f.label,multi:f.multi,nb:f.options.length,choix:f.options.slice(0,15).map(x=>x.label)})),adresseListeVue:DET.browse}};
   const w=hl.find(([p])=>lp0&&p.includes(lp0)&&p.split('/').filter(Boolean).length>=2);
   if(w){try{
@@ -1888,6 +2024,7 @@ const css=`
 .scr .bb{height:144px;margin:0 29px 28px;border:3px solid #111;border-radius:72px;display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:700;cursor:pointer;background:#f3f2ed;box-shadow:0 4px 0 #bbb;text-align:center}
 .scr .tb{height:86px;flex:none;display:flex;justify-content:flex-end;align-items:center;gap:20px;padding:0 22px}
 .scr .chl{flex:1;min-height:0;overflow:hidden}
+.scr .rvl{padding:0 29px}.scr .rvi{padding:18px 0;border-bottom:2px solid #999;font-size:30px;line-height:1.25}.scr .rvi div{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;margin-top:6px}.scr .rvn{padding:14px 29px;font-size:26px}
 .scr .chr{height:86px;display:flex;align-items:center;padding:0 29px;font-size:34px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .scr .pg{height:101px;flex:none;display:flex;align-items:center;justify-content:center;gap:26px;font-size:34px;border-top:1px solid #bbb}
 .scr .pg .pb{border:0;background:none;font-size:56px;line-height:1;padding:0 24px;cursor:pointer;color:#111}
@@ -1951,16 +2088,9 @@ function listItems(doc,c){const out=[],idx={};
  return out.filter(x=>x.name)}
 
 // charge la liste (accueil, adresse avec filtres ou recherche) avec la même adresse que celle du .lua ; sel = choix des filtres
-function apiItems(c,j){const a=Array.isArray(j)?j:(j.novels||j.results||j.items||j.data||[]),root=(c.list||'/novel/').replace(/\/+$/,'');
- return a.filter(n=>n&&typeof n.slug=='string').map(n=>{const cv=n.coverImage||n.cover||n.coverUrl||n.image||n.thumbnail;
-  return{name:String(n.title||n.name||n.slug),path:root+'/'+n.slug,cover:typeof cv=='string'&&cv?new URL(cv,c.base+'/').href:''}})}
 async function loadList(c,term,sel){
  const J=joinOf(c.filters);let url,type;
  // sites Next.js : la recherche passe par l'API (même logique que le .lua généré)
- if(!term&&c.browse&&c.browseApi){url=expandUrl(c.browse,sel,'',1,J);const r=await getPage(url);
-  if(r.status>=400)throw new Error('La liste par API répond HTTP '+r.status);
-  let j;try{j=JSON.parse(r.text)}catch{throw new Error("La liste par API n'a pas répondu en JSON.")}
-  return{items:apiItems(c,j),url,paste:false}}
  if(term&&c.apiSearch&&c.next){const url=c.base+c.apiSearch.replace('{q}',enc(term)),r=await getPage(url);
   if(r.status>=400)throw new Error('La recherche par API répond HTTP '+r.status);
   let j;try{j=JSON.parse(r.text)}catch{throw new Error("La recherche par API n'a pas répondu en JSON.")}
@@ -1969,6 +2099,12 @@ async function loadList(c,term,sel){
    return{name:String(n.title||n.name||n.slug),path:root+'/'+n.slug,cover:typeof cv=='string'&&cv?new URL(cv,c.base+'/').href:''}});
   return{items,url,paste:false}}
  if(term){if(!c.search)throw new Error("Je n'ai pas encore l'adresse de recherche de ce site.");url=expandUrl(c.search,sel,term,1,J);type='search'}
+ else if(c.browse&&c.apiList){url=expandUrl(c.apiList,sel,'',1,J);const r=await getPage(url);
+  if(r.status>=400)throw new Error("L'API de liste répond HTTP "+r.status);
+  let j;try{j=JSON.parse(r.text)}catch{throw new Error("L'API de liste n'a pas répondu en JSON.")}
+  const root=(c.list||'/novel/').replace(/\/+$/,'');
+  return{items:(listApiArr(j)||[]).filter(n=>n&&typeof n.slug=='string').map(n=>{const cv=n.coverImage||n.cover||n.coverUrl||n.image||n.thumbnail;
+   return{name:String(n.title||n.name||n.slug),path:root+'/'+n.slug,cover:typeof cv=='string'&&cv?new URL(cv,c.base+'/').href:''}}),url,paste:false}}
  else if(c.browse){url=expandUrl(c.browse,sel,'',1,J);type='list'}
  else{url=c.base+'/';type='home'}
  const p=await pg(url,type);
@@ -2114,12 +2250,16 @@ function open(){
     if(!view.nov){bindBack(S(sub(H(view.item.name),'<div class="ct"><div class="ld">⏳ Chargement de la fiche…</div></div>')),back);
      const nv=await loadNovel(c,view.item.path);if(tk!=T)return;view.nov=nv;if(!nv.chapters.length)view.dtab='c'}
     const n=view.nov,dt=view.dtab||'d';
-    const tabs=`<div class="tabs"><button data-d="d" class="${dt=='d'?'on':''}">Détails</button><button data-d="c" class="${dt=='c'?'on':''}">Chapitres</button></div>`;
+    const tabs=`<div class="tabs"><button data-d="d" class="${dt=='d'?'on':''}">Détails</button><button data-d="c" class="${dt=='c'?'on':''}">Chapitres</button>${c.rvm?`<button data-d="r" class="${dt=='r'?'on':''}">Avis</button>`:''}</div>`;
+    if(dt=='r'&&!view.revs){bindBack(S(sub(H(n.name),'<div class="ct"><div class="ld">⏳ Chargement des avis…</div></div>','',tabs)),back);
+     try{view.revs=await loadReviews(c,view.item.path);view.revErr=''}catch(e){view.revs=[];view.revErr=e.message}if(tk!=T)return}
     let inner,post=()=>{};
     if(dt=='d'){const cv=n.cover||view.item.cover;
      inner=`<div class="ct"><div class="dtop">${cv?`<img class="dcv" referrerpolicy="no-referrer" src="${H(cv)}" alt="">`:`<div class="dcv">${ph(n.name)}</div>`}<div class="dmeta"><div class="dsub">${n.chapters.length} ch</div><div class="dsum">${H(n.summary||'(pas de description)')}</div></div></div><div class="bb" id="pvgo">▶  Commencer la lecture</div><div class="bb">♡ Ajouter aux favoris</div><div class="bb" id="pvref">Actualiser la liste des chapitres</div></div>`;
      post=s=>{s.querySelector('#pvgo').onclick=()=>{if(n.chapters.length){view={k:'read',nov:n,i:0,item:view.item,cp:view.cp,rev:view.rev};draw()}};
       s.querySelector('#pvref').onclick=()=>{view.nov=null;draw()}}}
+    else if(dt=='r'){const rs=view.revs||[];
+     inner=`<div class="ct"><div class="rvl">${rs.length?rs.slice(0,5).map(x=>`<div class="rvi"><b>${H(x.author)}</b>${x.rating?' · '+'★'.repeat(Math.min(5,Math.round(x.rating))):''}<div>${H(x.content)}</div></div>`).join(''):`<div class="empty">${view.revErr?'Avis illisibles ('+H(view.revErr)+')':'Aucun avis pour ce roman.'}</div>`}</div>${rs.length?`<div class="rvn">${rs.length} avis lus (5 affichés)</div>`:''}</div>`}
     else if(!n.chapters.length){inner=`<div class="ct">${errBox('Aucun chapitre trouvé.')}</div>`}
     else{
      const chs=view.rev?n.chapters:[...n.chapters].reverse(),R=11,np=Math.max(1,Math.ceil(chs.length/R));
