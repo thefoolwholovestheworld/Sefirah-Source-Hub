@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "_doc": "Exemples few-shot pour /ai : HTML → config qui marche.",
+  "examples": [
+    {
+      "id": "novelfrance",
+      "moteur": "next",
+      "type": "novel",
+      "signature": "self.__next_f",
+      "pieges": [
+        "le texte est dans le JSON de self.__next_f, pas dans le HTML",
+        "les entités HTML (&#x27;) sont dans les chaînes JSON, à décoder",
+        "les paragraphes sont dans initialChapter.paragraphs (champ content)"
+      ],
+      "config": {
+        "type": "novel",
+        "list": "/novel/",
+        "chap": "/chapter-",
+        "next": true,
+        "nkNovel": "initialNovel",
+        "nkChap": "initialChapter",
+        "nkPara": "paragraphs",
+        "nkText": "content",
+        "apiChap": "/api/chapters/{slug}?skip={skip}&take=50&order=asc"
+      }
+    },
+    {
+      "id": "madara-exemple",
+      "moteur": "madara",
+      "type": "manga",
+      "signature": "wp-manga",
+      "pieges": [
+        "les chapitres sont parfois chargés en AJAX : /manga/<slug>/ajax/chapters/",
+        "images en data-src, classe wp-manga-chapter-img",
+        "statut dans .post-status, auteur dans .author-content, genres dans .genres-content"
+      ],
+      "config": {
+        "type": "manga",
+        "list": "/manga/",
+        "chap": "/chapter-",
+        "cont": "reading-content",
+        "img": "wp-manga-chapter-img",
+        "search": "https://site.com/?s={q}&post_type=wp-manga"
+      }
+    },
+    {
+      "id": "wpjson-exemple",
+      "moteur": "wpjson",
+      "type": "novel",
+      "signature": "/wp-json/",
+      "pieges": [
+        "recherche via /wp-json/wp/v2/search?search={q} — vérifier que l'API est ouverte",
+        "les routes /wp/v2/search renvoient JSON, pas HTML"
+      ],
+      "config": {
+        "type": "novel",
+        "list": "/novel/",
+        "chap": "/chapter-",
+        "search": "https://site.com/wp-json/wp/v2/search?search={q}&per_page=20&page={page}"
+      }
+    }
+  ]
+}
