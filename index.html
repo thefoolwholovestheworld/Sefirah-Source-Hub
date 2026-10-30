@@ -40,9 +40,9 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 <p style="margin:0 0 8px"><small>Les sources sans problème sont ajoutées automatiquement au catalogue, marquées « non vérifié ».</small></p>
 <div class="row"><input id="cu" type="url" placeholder="https://exemple.com" aria-label="Adresse du site" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="b" id="cai">✨ Générer le .lua</button></div>
 <details class="help" id="batch"><summary><b>🔎 Tester plusieurs sites d'un coup</b></summary>
-<p style="margin:8px 0"><small>Colle une liste d'adresses (une par ligne, ou un texte qui en contient). Le Hub analyse chaque site l'un après l'autre et te donne la liste de ceux qui marchent.</small></p>
+<p style="margin:8px 0"><small>Colle une liste d'adresses (une par ligne), ou l'adresse d'un fichier .json / .txt qui liste des sites (ex. liste de plugins) : le Hub en extrait les sites. Le Hub analyse chaque site l'un après l'autre et te donne la liste de ceux qui marchent.</small></p>
 <textarea id="bl" style="min-height:90px;width:100%" placeholder="https://site1.com&#10;https://site2.com"></textarea>
-<div class="row"><button class="b" id="bgo">▶ Tout tester</button></div><div id="bout"></div></details>
+<div class="row"><button class="b" id="bgo">▶ Tout tester</button><label style="margin-left:8px">max <input id="bmax" type="number" value="20" min="1" max="100" style="width:64px"></label></div><div id="bout"></div></details>
 <details class="help" id="smp"><summary><b>📄 Plusieurs pages d'exemple (plus fiable) / importer un .mhtml</b></summary>
 <span class="hint">Colle 1 à 3 fiches et 1 à 3 chapitres : le Hub compare les pages et garde ce qui revient à chaque fois (préfixe des œuvres, des chapitres, classe du texte ou des images, ordre).</span>
 <label>Fiches d'œuvres (une adresse par ligne)</label><textarea id="cf" style="min-height:64px" placeholder="https://exemple.com/novel/une-oeuvre&#10;https://exemple.com/novel/une-autre"></textarea>
@@ -2153,10 +2153,29 @@ $('#cai').onclick=generate;
 // ---------- test de plusieurs sites d'affilée : liste des sites qui marchent
 async function batchRun(){
  const btn=$('#bgo'),out=$('#bout');
- const urls=[...new Set((($('#bl').value.match(/https?:\/\/[^\s"'<>,)]+/gi))||[]).map(x=>{try{return new URL(x).origin}catch{return null}}).filter(Boolean))];
- if(!urls.length){out.innerHTML='<p class="w">Colle au moins une adresse (https://…).</p>';return}
+ const found=($('#bl').value.match(/https?:\/\/[^\s"'<>,)]+/gi))||[];
+ if(!found.length){out.innerHTML='<p class="w">Colle au moins une adresse (https://…).</p>';return}
  btn.disabled=true;const res=[];
- const draw=(cur)=>{out.innerHTML='<p>'+(cur?'<span class="sp"></span> Test '+(res.length+1)+'/'+urls.length+' : '+H(cur):'Terminé : '+res.filter(r=>r.ok).length+' site(s) qui marchent sur '+urls.length)+'</p>'
+ // une adresse de fichier (liste .json / .txt, raw.githubusercontent…) est lue : on en extrait les sites qu'elle contient
+ const SKIP=/(^|\.)(github\.com|githubusercontent\.com|jsdelivr\.net|unpkg\.com|cloudflare\.com|googleapis\.com|gstatic\.com|w3\.org|schema\.org)$/i;
+ const set=new Set();let note='';
+ for(const x of found){
+  let o;try{o=new URL(x)}catch{continue}
+  if(/\.(json|txt|md|csv)(\?|$)/i.test(o.pathname)||/githubusercontent\.com$/i.test(o.hostname)){
+   out.innerHTML='<p><span class="sp"></span> Lecture de la liste : '+H(x)+'</p>';
+   try{const p=await getPage(x);if(!p||!p.text||p.status>=400)throw new Error('HTTP '+(p&&p.status));
+    let sites=[];
+    try{const walk=v=>{if(Array.isArray(v))v.forEach(walk);else if(v&&typeof v=='object')for(const k in v){if(/^(site|siteurl|baseurl|base_url|homepage|website)$/i.test(k)&&typeof v[k]=='string')sites.push(v[k]);else walk(v[k])}};walk(JSON.parse(p.text))}catch{}
+    if(!sites.length)sites=p.text.match(/https?:\/\/[^\s"'<>,)\\]+/gi)||[];
+    sites.forEach(y=>{try{const h=new URL(y);if(!SKIP.test(h.hostname))set.add(h.origin)}catch{}});
+   }catch(e){note+='<p class="w">⚠ Liste illisible ('+H(x)+') : '+H(e.message)+'</p>'}
+  }else if(!SKIP.test(o.hostname))set.add(o.origin);
+ }
+ const MAX=Math.max(1,Math.min(100,parseInt($('#bmax').value)||20));
+ let urls=[...set];
+ if(urls.length>MAX){note+='<p class="w">'+urls.length+' sites trouvés : je teste les '+MAX+' premiers (change « max » pour en tester plus).</p>';urls=urls.slice(0,MAX)}
+ if(!urls.length){out.innerHTML=note+'<p class="w">Aucun site trouvé dans ce que tu as collé.</p>';btn.disabled=false;return}
+ const draw=(cur)=>{out.innerHTML=note+'<p>'+(cur?'<span class="sp"></span> Test '+(res.length+1)+'/'+urls.length+' : '+H(cur):'Terminé : '+res.filter(r=>r.ok).length+' site(s) qui marchent sur '+urls.length)+'</p>'
   +res.map(r=>'<div>'+(r.ok?'✔':'✘')+' <a href="'+H(r.u)+'" target="_blank" rel="noopener">'+H(r.u)+'</a> — '+H(r.m)+(r.ok?' <button class="b" data-u="'+H(r.u)+'">Ouvrir</button>':'')+'</div>').join('')};
  for(const u of urls){
   draw(u);LASTT=null;$('#cu').value=u;
