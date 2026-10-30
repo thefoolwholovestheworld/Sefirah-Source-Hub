@@ -482,6 +482,7 @@ async function probeSearchApi(org,lang){
  return ''}
 // ---------- créer : une adresse -> IA -> .lua
 const NEWCFG=()=>({rvi:'',name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',list:'',chap:'',cont:'',img:'',rev:false,next:false,nkNovel:'',nkChap:'',nkPara:'',nkText:'',nkContent:'',nkList:'',apiChap:'',apiSearch:'',filters:[],browse:'',engine:'',rvo:'auto',rvm:'',rvu:'',rvc:'',apiList:'',homePath:'/',apiHints:[]});
+ let CFG=NEWCFG(),LASTORG='';
 const siteBase=()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}};
 // cfg() : la configuration « propre » utilisée pour générer le .lua et pour les tests (filtres et adresse validés)
 const cfg=()=>{const base=siteBase();return {...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,apiList:chkBrowse(CFG.apiList,base).ok,rvm:CFG.rvo=='off'||!['wp','json','page'].includes(CFG.rvm)?'':CFG.rvm,rvu:sf(CFG.rvu,120),rvc:tok(CFG.rvc)?CFG.rvc:''}};
