@@ -1271,7 +1271,7 @@ function extractApiRoutes(html){
  while((m=re2.exec(html)))out.add(m[1]);
  return [...out].slice(0,12)}
 async function analyzeHome(u){
- let p=await getPage(u);
+ let p=await getPage(u); // Si le site bloque (404, 403, page vide), on tente de le lire via r.jina.ai if (p.status >= 400 || p.text.length < 300) {   try {     const jina = await getPage('https://r.jina.ai/' + u);     if (jina.status < 400 && jina.text.length > 500) {       p = jina;       console.log("Page lue via r.jina.ai avec succès");     }   } catch(e) { console.warn("Échec r.jina.ai", e); } }
  if(blocked(p))throw new Error('Site protégé (Cloudflare/CAPTCHA) : non contourné.');
  // racine 404 ou vide : on essaie les chemins d'accueil courants
  if(p.status>=400||p.text.length<300){
