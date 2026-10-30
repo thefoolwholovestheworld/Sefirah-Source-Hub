@@ -153,16 +153,38 @@ export default {
     const target = validTarget(u.searchParams.get('url') || '');
     if (!target) return json({ error: 'URL refusée : seuls les sites HTTP(S) publics sur les ports standards sont autorisés.' }, 400, cors);
     try {
-      const response = await fetch(target.href, {
-        method: 'GET',
-        redirect: 'manual',
-        headers: { 'User-Agent': 'SefirahSourceHub/1.1 (+site analyzer)', 'Accept': 'text/html,application/xhtml+xml,application/json;q=0.8,*/*;q=0.5' },
-        signal: AbortSignal.timeout(12000)
-      });
-      if (response.status >= 300 && response.status < 400) {
-        return new Response('Redirection non suivie par sécurité. Ouvre directement l’adresse de destination.', {
-          status: 502, headers: { ...cors, 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }
-        });
+      // Redirections suivies à la main (5 max) : chaque étape repasse par validTarget(), donc pas de SSRF vers un réseau privé.
+      // Avant : toute redirection (http→https, www, changement de domaine…) donnait une erreur 502.
+      const hdrs = {
+        'User-Agent': 'SefirahSourceHub/1.1 (+site analyzer)',
+        'Accept': 'text/html,application/xhtml+xml,application/json;q=0.8,*/*;q=0.5',
+        'Accept-Language': 'fr,en;q=0.8,ar;q=0.6'
+      };
+      let current = target, response = null, lastErr = null;
+      for (let hop = 0; hop <= 5; hop++) {
+        let attempt = 0;
+        response = null;
+        // 1 nouvel essai si la connexion échoue (coupure ou délai dépassé), jamais si le site a répondu
+        while (attempt < 2 && !response) {
+          try {
+            response = await fetch(current.href, { method: 'GET', redirect: 'manual', headers: hdrs, signal: AbortSignal.timeout(attempt ? 9000 : 12000) });
+          } catch (e) { lastErr = e; attempt++; }
+        }
+        if (!response) throw lastErr || new Error('connexion impossible');
+        if (response.status >= 300 && response.status < 400 && response.headers.get('location')) {
+          let next;
+          try { next = validTarget(new URL(response.headers.get('location'), current.href).href); } catch { next = null; }
+          if (!next) {
+            return new Response('Redirection vers une adresse refusée par sécurité (privée ou non standard).', {
+              status: 502, headers: { ...cors, 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' }
+            });
+          }
+          try { await response.body?.cancel(); } catch {}
+          current = next;
+          if (hop === 5) return new Response('Trop de redirections (plus de 5).', { status: 502, headers: { ...cors, 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
+          continue;
+        }
+        break;
       }
       const type = response.headers.get('content-type') || 'application/octet-stream';
       if (!/(text\/html|application\/xhtml\+xml|text\/plain|application\/json|javascript)/i.test(type)) {
@@ -187,7 +209,7 @@ export default {
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       return new Response(bytes, { status: response.status, headers: { ...cors, 'Content-Type': type, 'Cache-Control': 'no-store' } });
     } catch (e) {
-      return new Response('Échec de récupération : ' + String(e && e.message || e).slice(0, 200), { status: 502, headers: { ...cors, 'Content-Type': 'text/plain; charset=utf-8' } });
+      return new Response('Échec de récupération (le site ne répond pas ou refuse le Worker) : ' + String(e && e.message || e).slice(0, 200), { status: 502, headers: { ...cors, 'Content-Type': 'text/plain; charset=utf-8' } });
     }
   }
 };
