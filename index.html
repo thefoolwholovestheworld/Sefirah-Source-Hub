@@ -140,8 +140,20 @@ function pickExamples(engine,type,html){
 }
 async function getPage(url){const px=PROXY;let err;const im=IMP[nk(url)];if(im!=null)return{status:200,text:im};
  try{const r=await fetch(url);return {status:r.status,text:await r.text()}}catch(e){err=e}
- const r=await fetch(px+'?url='+encodeURIComponent(url));return {status:r.status,text:await r.text()}}
-const blocked=p=>(p.status==403||p.status==503||p.status==429)&&/cloudflare|just a moment|captcha|attention required/i.test(p.text);
+ // via le proxy : 1 nouvel essai si le Worker répond 502 (coupure ponctuelle), sauf refus de sécurité
+ let last=null;
+ for(let i=0;i<2;i++){
+  try{const r=await fetch(px+'?url='+encodeURIComponent(url),{signal:AbortSignal.timeout?AbortSignal.timeout(30000):undefined});const text=await r.text();
+   last={status:r.status,text};
+   if(r.status==502&&i==0&&!/refusée|Trop de redirections/.test(text)){await new Promise(z=>setTimeout(z,700));continue}
+   return last}
+  catch(e){err=e;if(i==0)await new Promise(z=>setTimeout(z,700))}}
+ if(last)return last;throw err||new Error('Failed to fetch')}
+const blocked=p=>((p.status==403||p.status==503||p.status==429)&&/cloudflare|just a moment|captcha|attention required/i.test(p.text))
+ ||(p.status<400&&p.text.length<70000&&/cf_chl_opt|challenge-platform|<title>\s*Just a moment|Checking your browser before accessing|cf-browser-verification/i.test(p.text));
+// message clair quand une page ne répond pas : on reprend la phrase du Worker (redirection refusée, délai dépassé…)
+const whyHttp=p=>{const t=String(p&&p.text||'').trim();const w=t.length&&t.length<220&&!/<html|<!doctype/i.test(t)?' — '+t.slice(0,100):'';
+ const st=p&&p.status;return (st>=520&&st<=527?' (Cloudflare : le serveur du site est en panne ou refuse le Worker)':st==403?' (accès refusé : le site bloque les robots)':st==404?' (adresse introuvable)':'')+w};
 const dom=h=>new DOMParser().parseFromString(h,'text/html');
 // ---------- icônes des sites (favicon) : service de favicons, puis /favicon.ico du site, sinon masquée
 const ico=(site,n=20)=>{let o='';try{o=new URL(site).origin}catch{}
@@ -1285,10 +1297,18 @@ async function analyzeHome(u){
     if(p2.status<400&&p2.text.length>500){p=p2;u=base+t;break}
    }catch{}}
  }
- if(p.status>=400||p.text.length<300)throw new Error('Réponse vide ou erreur HTTP '+p.status);
+ if(p.status>=400||p.text.length<300){
+  // variantes d'adresse : avec / sans « www. », puis http
+  const ho=new URL(u).hostname,alt=[ho.startsWith('www.')?ho.slice(4):'www.'+ho];
+  for(const h2 of alt){for(const pr of ['https://','http://']){
+   try{const p3=await getPage(pr+h2+'/');if(p3.status<400&&p3.text.length>=300&&!blocked(p3)){p=p3;u=pr+h2+'/';break}}catch{}}
+   if(p.status<400&&p.text.length>=300)break}}
+ if(blocked(p))throw new Error('Site protégé (Cloudflare/CAPTCHA) : non contourné.');
+ if(p.status>=400||p.text.length<300)throw new Error('Réponse vide ou erreur HTTP '+p.status+whyHttp(p));
  const d=dom(p.text),base=new URL(u).origin,seg={};
  d.querySelectorAll('a[href]').forEach(a=>{try{const x=new URL(a.getAttribute('href'),base);if(x.origin!=base)return;const s=x.pathname.split('/').filter(Boolean);if(s.length>=2){const k='/'+s[0]+'/';seg[k]=(seg[k]||0)+1}}catch{}});
- const top=Object.entries(seg).sort((a,b)=>b[1]-a[1]).slice(0,4);
+ const NOWORK=/^\/(category|categories|tag|tags|genre|genres|author|authors|page|pages|wp-content|wp-json|wp-includes|feed|blog|news|forum|user|users|profile|login|register|contact|about|privacy|terms|dmca|search|latest|popular|rss|sitemap|cdn-cgi|account|auth|api)\//i;
+ const top=Object.entries(seg).filter(([k])=>!NOWORK.test(k)).sort((a,b)=>b[1]-a[1]).slice(0,4);
  CFG.name=(d.querySelector('meta[property="og:site_name"]')?.content||d.title||'').trim().slice(0,40);
  const hl=(d.documentElement.getAttribute('lang')||'').slice(0,2).toLowerCase();if(/^[a-z]{2}$/.test(hl))CFG.lang=hl;
  const f=d.querySelector('form[action*=search],form[role=search]');
