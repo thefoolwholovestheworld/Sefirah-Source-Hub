@@ -1981,6 +1981,12 @@ function skel(root,max){const out=[];let len=0;
  w(root,0);return out.join('\n').slice(0,max)}
 // modèles de liens qui se répètent (ex. /novel/x/chapter-# ×120) : montre tout de suite le préfixe des chapitres
 const patterns=ls=>{const m={};ls.forEach(([p])=>{const k=p.replace(/\d+(\.\d+)?/g,'#');(m[k]=m[k]||{modele:k,nb:0,exemple:p}).nb++});return Object.values(m).filter(x=>x.nb>=3).sort((a,b)=>b.nb-a.nb).slice(0,8)};
+// associe un message d'échec du test à la page concernée (clés de DBG : home, search, fiche, chapitre)
+function stageOf(m){m=String(m||'');
+ if(/Lecture|chapitre illisible|Page de lecture|Next\.js : chapitre/i.test(m))return'chapitre';
+ if(/^Recherche|^Filtres/.test(m))return'search';
+ if(/^Fiche|^Avis|^Ordre|Aucun lien de chapitre|^Madara|Next\.js/.test(m))return'fiche';
+ return'home'}
 function digest(stage,org){const p=DBG[stage];if(!p)return null;
  const o={page:stage,url:p.url.slice(0,200),http:p.status,taille:p.html.length};
  if(p.status>=400||p.html.length<300){o.debut=cleanHtml(p.html).slice(0,500);return o}
