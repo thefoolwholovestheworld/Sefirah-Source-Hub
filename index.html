@@ -2564,4 +2564,50 @@ window.openPreview=open;
 })();
 
 </script>
+<script>
+/* Sefirah Source Hub — « Tester plusieurs sites » par paquets : après les N premiers (champ « max »),
+   un bouton teste les N suivants, sans tout refaire. */
+(function(){
+let Q=null; // { urls, res, pos, note }
+const SKIP=/(^|\.)(github\.com|githubusercontent\.com|jsdelivr\.net|unpkg\.com|cloudflare\.com|googleapis\.com|gstatic\.com|w3\.org|schema\.org)$/i;
+async function collect(){
+ const found=($('#bl').value.match(/https?:\/\/[^\s"'<>,)]+/gi))||[],set=new Set();let note='';
+ for(const x of found){let o;try{o=new URL(x)}catch{continue}
+  if(/\.(json|txt|md|csv)(\?|$)/i.test(o.pathname)||/githubusercontent\.com$/i.test(o.hostname)){
+   $('#bout').innerHTML='<p><span class="sp"></span> Lecture de la liste : '+H(x)+'</p>';
+   try{const p=await getPage(x);if(!p||!p.text||p.status>=400)throw new Error('HTTP '+(p&&p.status));
+    let sites=[];
+    try{const walk=v=>{if(Array.isArray(v))v.forEach(walk);else if(v&&typeof v=='object')for(const k in v){if(/^(site|siteurl|baseurl|base_url|homepage|website)$/i.test(k)&&typeof v[k]=='string')sites.push(v[k]);else walk(v[k])}};walk(JSON.parse(p.text))}catch{}
+    if(!sites.length)sites=p.text.match(/https?:\/\/[^\s"'<>,)\\]+/gi)||[];
+    sites.forEach(y=>{try{const h=new URL(y);if(!SKIP.test(h.hostname))set.add(h.origin)}catch{}});
+   }catch(e){note+='<p class="w">⚠ Liste illisible ('+H(x)+') : '+H(e.message)+'</p>'}
+  }else if(!SKIP.test(o.hostname))set.add(o.origin)}
+ return{urls:[...set],note}}
+async function run(cont){
+ const btn=$('#bgo'),out=$('#bout'),MAX=Math.max(1,Math.min(100,parseInt($('#bmax').value)||20));
+ if(!$('#bl').value.match(/https?:\/\//i)&&!(cont&&Q)){out.innerHTML='<p class="w">Colle au moins une adresse (https://…).</p>';return}
+ btn.disabled=true;
+ if(!cont||!Q){const c=await collect();
+  if(!c.urls.length){out.innerHTML=c.note+'<p class="w">Aucun site trouvé dans ce que tu as collé.</p>';btn.disabled=false;Q=null;return}
+  Q={urls:c.urls,res:[],pos:0,note:c.note}}
+ const part=Q.urls.slice(Q.pos,Q.pos+MAX),total=Q.urls.length;
+ const draw=cur=>{const left=total-Q.pos,okn=Q.res.filter(r=>r.ok).length;
+  out.innerHTML=Q.note+'<p>'+(cur?'<span class="sp"></span> Test '+(Q.res.length+1)+'/'+total+' : '+H(cur)
+   :'Terminé pour ce paquet : '+okn+' site(s) qui marchent sur '+Q.res.length+' testé(s), '+total+' site(s) dans la liste.')+'</p>'
+   +Q.res.map(r=>'<div>'+(r.ok?'✔':'✘')+' <a href="'+H(r.u)+'" target="_blank" rel="noopener">'+H(r.u)+'</a> — '+H(r.m)+(r.ok?' <button class="b" data-u="'+H(r.u)+'">Ouvrir</button>':'')+'</div>').join('')
+   +(!cur&&left>0?'<div class="row"><button class="b" id="bnx">⏭ Tester les '+Math.min(MAX,left)+' suivants (il en reste '+left+')</button></div>':'')};
+ for(const u of part){
+  draw(u);LASTT=null;$('#cu').value=u;
+  try{await generate()}catch(e){}
+  const t=LASTT||[],bad=t.filter(x=>x[0]=='e');
+  Q.res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:'aucune œuvre ni chapitre lisible'}:{u,ok:true,m:'œuvres et chapitres lus'});
+  Q.pos++}
+ draw(null);btn.disabled=false;
+ out.querySelectorAll('button[data-u]').forEach(b=>b.onclick=async()=>{$('#cu').value=b.dataset.u;await generate();$('#cu').scrollIntoView()});
+ const nx=$('#bnx');if(nx)nx.onclick=()=>run(true)}
+window.batchRun=()=>run(false);
+$('#bgo').onclick=()=>run(false);
+})();
+</script>
+
 </body></html>
