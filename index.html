@@ -60,8 +60,8 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 <section id="catalogue"><div class="row"><input id="cq" placeholder="Rechercher un nom…"><select id="cl"><option value="">Toutes langues</option></select><select id="ct"><option value="">Tous types</option><option>novel</option><option>manga</option></select><select id="cs"><option value="">Tout statut</option><option value="non vérifié">non vérifié</option><option value="testé">testé</option></select></div>
 <small id="cn"></small><div class="grid" id="cg"></div>
 <details class="card" id="mem" style="margin-top:14px"><summary><b>🎓 Mémoire de l'IA</b> <small id="memn"></small></summary>
-<p style="margin:8px 0"><small>L'IA s'inspire des sources qui marchent (catalogue) et des réparations déjà réussies. Elle apprend aussi seule : chaque réparation réussie est retenue dans ce navigateur. Tu peux lui montrer un fichier .lua qui marche pour qu'elle en tire une leçon.</small></p>
-<div class="row"><button class="b" type="button" id="memlua">📥 Apprendre d'un fichier .lua</button><button class="b s" type="button" id="memexp">⬇ Exporter la mémoire</button><button class="b s" type="button" id="memclr">🗑 Oublier ce navigateur</button><input type="file" id="memf" accept=".lua" multiple style="display:none"></div>
+<p style="margin:8px 0"><small>L'IA apprend toute seule, en arrière-plan : elle lit les sources du catalogue (une seule fois par version) et retient chaque réparation réussie dans ce navigateur. Le bouton ci-dessous ne sert que pour un fichier .lua qui n'est pas dans le catalogue.</small></p>
+<div class="row"><button class="b" type="button" id="memlua">📥 Apprendre d'un fichier .lua (hors catalogue)</button><button class="b s" type="button" id="memexp">⬇ Exporter la mémoire</button><button class="b s" type="button" id="memclr">🗑 Oublier ce navigateur</button><input type="file" id="memf" accept=".lua" multiple style="display:none"></div>
 <small id="memout"></small></details></section>
 
 
@@ -131,11 +131,16 @@ RÈGLES PRATIQUES (tirées de 22 sources réelles qui marchent) :
 16. Sites SPA (Next.js, Nuxt, React) : les liens ne sont pas dans le HTML. Cherche les appels API dans les scripts (fetch('/api/...'), axios.get('/api/...')). Si une route de recherche JSON existe (par ex. /api/search/{q}?page={page}), mets-la dans search avec {q} et {page}.
 17. Si le HTML ne contient aucun lien d'œuvre (site 100 % JS), utilise l'API JSON de la liste (/api/novels, /api/manga, /api/series) et mets-la dans apiList avec {page} si le paramètre est visible. Sinon, renvoie une chaîne vide et laisse l'utilisateur coller le code d'une page.`;
  // ---------- base de connaissances few-shot : envoie au Worker les 3 exemples les plus proches du site analysé
-let KB=[],LECONS=[];
+let KB=[],LECONS=[];var AUTOST=null,KBSITE=null;
 // mémoire de l'IA = connaissances du site (sources/knowledge.json) + ce que ce navigateur a appris (réparations réussies, fichiers .lua lus)
 const KBL=()=>LS.get('kb_local',{examples:[],lecons:[]});
-function loadKB(){fetch('sources/knowledge.json').then(r=>r.ok?r.json():null).then(j=>{
-  const l=KBL();KB=(j&&Array.isArray(j.examples)?j.examples:[]).concat(l.examples||[]);LECONS=(j&&Array.isArray(j.lecons)?j.lecons:[]).concat(l.lecons||[]);memInfo()}).catch(()=>{const l=KBL();KB=l.examples||[];LECONS=l.lecons||[];memInfo()})}
+const KBA=()=>LS.get('kb_auto',{items:{}});
+// fusion : connaissances du site (écrites à la main) > sources lues automatiquement > fichiers montrés à la main
+function mergeKB(){
+ const j=KBSITE,l=KBL(),site=j&&Array.isArray(j.examples)?j.examples:[],ids=new Set(site.map(x=>x.id));
+ const auto=Object.values(KBA().items||{}).map(v=>v&&v.ex).filter(x=>x&&!ids.has(x.id));
+ KB=site.concat(auto,l.examples||[]);LECONS=(j&&Array.isArray(j.lecons)?j.lecons:[]).concat(l.lecons||[]);memInfo()}
+function loadKB(){fetch('sources/knowledge.json').then(r=>r.ok?r.json():null).then(j=>{KBSITE=j;mergeKB()}).catch(()=>{KBSITE=null;mergeKB()})}
 loadKB();
 function pickExamples(engine,type,html){
  if(!KB.length)return [];
@@ -183,7 +188,8 @@ const ico=(site,n=20)=>{let o='';try{o=new URL(site).origin}catch{}
  return `<img class="ico" width="${n}" height="${n}" alt="" loading="lazy" referrerpolicy="no-referrer" src="https://www.google.com/s2/favicons?sz=64&amp;domain_url=${encodeURIComponent(o)}" data-fb="${H(o+'/favicon.ico')}">`};
 const hookIco=r=>r.querySelectorAll('img.ico').forEach(i=>i.addEventListener('error',()=>{const f=i.dataset.fb;if(!i.dataset.t&&f){i.dataset.t=1;i.src=f}else i.style.visibility='hidden'}));
 // ---------- 🎓 mémoire de l'IA : apprendre d'un .lua, exporter, oublier
-function memInfo(){const e=$('#memn');if(e){const l=KBL();e.textContent='('+KB.length+' sources, '+LECONS.length+' leçons'+((l.lecons||[]).length||(l.examples||[]).length?', dont '+((l.examples||[]).length+(l.lecons||[]).length)+' apprises ici':'')+')'}}
+function memInfo(){const e=$('#memn');if(e){const l=KBL(),n=(l.examples||[]).length+(l.lecons||[]).length,a=Object.keys(KBA().items||{}).length;
+ e.textContent='('+KB.length+' sources, '+LECONS.length+' leçons'+(a?', '+a+' lues automatiquement':'')+(n?', '+n+' apprises ici':'')+(AUTOST&&AUTOST.done<AUTOST.total?' · lecture en cours '+AUTOST.done+'/'+AUTOST.total:'')+')'}}
 function luaLesson(name,code){
  const g=(k)=>{const m=code.match(new RegExp('^local\\s+'+k+'\\s*=\\s*"([^"]*)"','m'));return m?m[1]:''};
  const id=(code.match(/\bid\s*=\s*"([a-z0-9_-]+)"/)||[])[1]||name.replace(/\.lua$/i,'').toLowerCase().replace(/[^a-z0-9]/g,'');
@@ -200,7 +206,33 @@ $('#memf').onchange=async e=>{const l=KBL();let n=0;
   const x=luaLesson(f.name,t);l.examples=(l.examples||[]).filter(y=>y.id!==x.id).concat([x]);n++}
  LS.set('kb_local',l);loadKB();e.target.value='';$('#memout').textContent=n?('✔ '+n+' fichier(s) appris.'):'Aucun fichier d\'extension reconnu.'};
 $('#memexp').onclick=()=>dl('knowledge.json',JSON.stringify({version:1,updated:new Date().toISOString().slice(0,10),examples:KB.map(({local,...x})=>x),lecons:LECONS.map(({local,...x})=>x)},null,1));
-$('#memclr').onclick=()=>{if(confirm('Oublier ce que l\'IA a appris dans ce navigateur ? (les connaissances du site restent)')){localStorage.removeItem('kb_local');loadKB();$('#memout').textContent='Mémoire locale effacée.'}};
+$('#memclr').onclick=()=>{if(confirm('Oublier ce que l\'IA a appris dans ce navigateur ? (les connaissances du site restent)')){localStorage.removeItem('kb_local');localStorage.removeItem('kb_auto');loadKB();$('#memout').textContent='Mémoire locale effacée (elle se reconstruira toute seule au prochain chargement du site).'}};
+// ---------- 🎓 apprentissage automatique : en arrière-plan, l'IA lit toutes les sources du catalogue (testées) toute seule
+// une source n'est relue que si sa version change dans le manifeste ; rien n'est envoyé à un serveur, tout reste dans ce navigateur
+let AUTOBUSY=false;
+async function autoLearn(){
+ if(AUTOBUSY)return;AUTOBUSY=true;
+ try{
+  const A=KBA();A.items=A.items||{};
+  const ok=SRC.filter(s=>s.status=='testé'&&s.file),ids=new Set(ok.map(s=>s.id));
+  Object.keys(A.items).forEach(k=>{if(!ids.has(k))delete A.items[k]});
+  const todo=ok.filter(s=>!A.items[s.id]||A.items[s.id].ver!==s.version);
+  AUTOST={done:0,total:todo.length};
+  for(const s of todo){
+   try{
+    const r=await fetch(s.file,{cache:'no-cache'});
+    if(r.ok){const t=await r.text();
+     if(/ext:(parseNovel|searchNovels)|function ext/.test(t)){
+      const x=luaLesson(s.id+'.lua',t);x.id=s.id;x.type=s.type;x.config.type=s.type;x.pieges=x.pieges.slice(0,3);x.auto=true;
+      A.items[s.id]={ver:s.version,ex:x};
+      try{localStorage.setItem('kb_auto',JSON.stringify(A))}catch{}}}
+   }catch{}
+   AUTOST.done++;mergeKB();
+   await new Promise(z=>setTimeout(z,200));   // une source à la fois, sans gêner l'utilisation du site
+  }
+  try{localStorage.setItem('kb_auto',JSON.stringify(A))}catch{}
+ }finally{AUTOBUSY=false;AUTOST=null;mergeKB()}
+}
 // ---------- catalogue
 let SRC=[];
 // sources du manifeste = déjà vérifiées par toi => « testé » ; sources envoyées par les utilisateurs => « non vérifié »
@@ -213,7 +245,7 @@ function mergeCat(man,com){
   license:'—',status:'non vérifié',lastCheck:'',file:PROXY+'/catalogue/file/'+x.id+'.lua',community:true}));
  return (man||[]).map(x=>({...x,status:'testé'})).concat(extra)}
 Promise.all([fetch('sources/manifest.json').then(r=>r.json()),
- fetch(PROXY+'/catalogue',{signal:AbortSignal.timeout?AbortSignal.timeout(6000):undefined}).then(r=>r.ok?r.json():{}).catch(()=>({}))]).then(([j,cm])=>{SRC=mergeCat(j.sources,cm&&cm.sources);[...new Set(SRC.map(s=>s.lang))].sort().forEach(l=>$('#cl').append(new Option(l,l)));cat()}).catch(()=>$('#cn').textContent='Manifeste introuvable (ouvre le site via GitHub Pages ou un serveur local).');
+ fetch(PROXY+'/catalogue',{signal:AbortSignal.timeout?AbortSignal.timeout(6000):undefined}).then(r=>r.ok?r.json():{}).catch(()=>({}))]).then(([j,cm])=>{SRC=mergeCat(j.sources,cm&&cm.sources);[...new Set(SRC.map(s=>s.lang))].sort().forEach(l=>$('#cl').append(new Option(l,l)));cat();setTimeout(autoLearn,1500)}).catch(()=>$('#cn').textContent='Manifeste introuvable (ouvre le site via GitHub Pages ou un serveur local).');
 function cat(){const q=$('#cq').value.toLowerCase(),l=$('#cl').value,t=$('#ct').value,s=$('#cs').value;
  const L=SRC.filter(x=>(!q||x.name.toLowerCase().includes(q))&&(!l||x.lang==l)&&(!t||x.type==t)&&(!s||x.status==s));
  $('#cn').textContent=L.length+' source(s)';
