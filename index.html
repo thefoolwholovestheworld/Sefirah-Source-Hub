@@ -58,7 +58,11 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 </section>
 
 <section id="catalogue"><div class="row"><input id="cq" placeholder="Rechercher un nom…"><select id="cl"><option value="">Toutes langues</option></select><select id="ct"><option value="">Tous types</option><option>novel</option><option>manga</option></select><select id="cs"><option value="">Tout statut</option><option value="non vérifié">non vérifié</option><option value="testé">testé</option></select></div>
-<small id="cn"></small><div class="grid" id="cg"></div></section>
+<small id="cn"></small><div class="grid" id="cg"></div>
+<details class="card" id="mem" style="margin-top:14px"><summary><b>🎓 Mémoire de l'IA</b> <small id="memn"></small></summary>
+<p style="margin:8px 0"><small>L'IA s'inspire des sources qui marchent (catalogue) et des réparations déjà réussies. Elle apprend aussi seule : chaque réparation réussie est retenue dans ce navigateur. Tu peux lui montrer un fichier .lua qui marche pour qu'elle en tire une leçon.</small></p>
+<div class="row"><button class="b" type="button" id="memlua">📥 Apprendre d'un fichier .lua</button><button class="b s" type="button" id="memexp">⬇ Exporter la mémoire</button><button class="b s" type="button" id="memclr">🗑 Oublier ce navigateur</button><input type="file" id="memf" accept=".lua" multiple style="display:none"></div>
+<small id="memout"></small></details></section>
 
 
 </main>
@@ -127,8 +131,12 @@ RÈGLES PRATIQUES (tirées de 22 sources réelles qui marchent) :
 16. Sites SPA (Next.js, Nuxt, React) : les liens ne sont pas dans le HTML. Cherche les appels API dans les scripts (fetch('/api/...'), axios.get('/api/...')). Si une route de recherche JSON existe (par ex. /api/search/{q}?page={page}), mets-la dans search avec {q} et {page}.
 17. Si le HTML ne contient aucun lien d'œuvre (site 100 % JS), utilise l'API JSON de la liste (/api/novels, /api/manga, /api/series) et mets-la dans apiList avec {page} si le paramètre est visible. Sinon, renvoie une chaîne vide et laisse l'utilisateur coller le code d'une page.`;
  // ---------- base de connaissances few-shot : envoie au Worker les 3 exemples les plus proches du site analysé
-let KB=[];
-fetch('sources/knowledge.json').then(r=>r.ok?r.json():null).then(j=>{if(j&&Array.isArray(j.examples))KB=j.examples}).catch(()=>{});
+let KB=[],LECONS=[];
+// mémoire de l'IA = connaissances du site (sources/knowledge.json) + ce que ce navigateur a appris (réparations réussies, fichiers .lua lus)
+const KBL=()=>LS.get('kb_local',{examples:[],lecons:[]});
+function loadKB(){fetch('sources/knowledge.json').then(r=>r.ok?r.json():null).then(j=>{
+  const l=KBL();KB=(j&&Array.isArray(j.examples)?j.examples:[]).concat(l.examples||[]);LECONS=(j&&Array.isArray(j.lecons)?j.lecons:[]).concat(l.lecons||[]);memInfo()}).catch(()=>{const l=KBL();KB=l.examples||[];LECONS=l.lecons||[];memInfo()})}
+loadKB();
 function pickExamples(engine,type,html){
  if(!KB.length)return [];
  const H_=String(html||'');
@@ -138,6 +146,20 @@ function pickExamples(engine,type,html){
    (ex.signature&&H_&&H_.includes(ex.signature)?50:0)
  })).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,3).map(x=>x.ex);
 }
+// leçons de réparation : celles dont le symptôme correspond au message d'échec (3 au maximum)
+function pickLessons(msgs){
+ const M=[].concat(msgs||[]).map(String);if(!LECONS.length||!M.length)return [];
+ const out=[];
+ LECONS.forEach(l=>{let re;try{re=new RegExp(l.symptome,'i')}catch{return}
+  if(M.some(m=>re.test(m))&&!out.includes(l))out.push(l)});
+ return out.slice(0,3)}
+// apprentissage : on retient une réparation qui a marché (jamais deux fois la même)
+function learnFix(msgs,cause,change){
+ try{const m=[].concat(msgs||[])[0];if(!m||!change)return;
+  const l=KBL(),sym=String(m).replace(/[.*+?^${}()|[\]\\]/g,'\\$&').slice(0,80);
+  if((l.lecons||[]).some(x=>x.symptome===sym&&x.solution===change))return;
+  l.lecons=(l.lecons||[]).concat([{symptome:sym,cause:String(cause||'').slice(0,160),solution:String(change).slice(0,200),local:true}]).slice(-60);
+  LS.set('kb_local',l);LECONS.push(l.lecons[l.lecons.length-1]);memInfo()}catch{}}
 async function getPage(url){const px=PROXY;let err;const im=IMP[nk(url)];if(im!=null)return{status:200,text:im};
  try{const r=await fetch(url);return {status:r.status,text:await r.text()}}catch(e){err=e}
  // via le proxy : 1 nouvel essai si le Worker répond 502 (coupure ponctuelle), sauf refus de sécurité
@@ -160,6 +182,25 @@ const ico=(site,n=20)=>{let o='';try{o=new URL(site).origin}catch{}
  if(!o)return '';
  return `<img class="ico" width="${n}" height="${n}" alt="" loading="lazy" referrerpolicy="no-referrer" src="https://www.google.com/s2/favicons?sz=64&amp;domain_url=${encodeURIComponent(o)}" data-fb="${H(o+'/favicon.ico')}">`};
 const hookIco=r=>r.querySelectorAll('img.ico').forEach(i=>i.addEventListener('error',()=>{const f=i.dataset.fb;if(!i.dataset.t&&f){i.dataset.t=1;i.src=f}else i.style.visibility='hidden'}));
+// ---------- 🎓 mémoire de l'IA : apprendre d'un .lua, exporter, oublier
+function memInfo(){const e=$('#memn');if(e){const l=KBL();e.textContent='('+KB.length+' sources, '+LECONS.length+' leçons'+((l.lecons||[]).length||(l.examples||[]).length?', dont '+((l.examples||[]).length+(l.lecons||[]).length)+' apprises ici':'')+')'}}
+function luaLesson(name,code){
+ const g=(k)=>{const m=code.match(new RegExp('^local\\s+'+k+'\\s*=\\s*"([^"]*)"','m'));return m?m[1]:''};
+ const id=(code.match(/\bid\s*=\s*"([a-z0-9_-]+)"/)||[])[1]||name.replace(/\.lua$/i,'').toLowerCase().replace(/[^a-z0-9]/g,'');
+ const manga=/type\s*=\s*"manga"/.test(code)||/parseChapterImages/.test(code);
+ const moteur=/__next_f|__NEXT_DATA__/.test(code)?'next':/wp-manga|madara/i.test(code)?'madara':/wp-json/.test(code)?'wpjson':'';
+ const cfg={type:manga?'manga':'novel'};
+ [['search','SEARCH'],['list','LISTP'],['chap','CHAPP'],['cont','CONT']].forEach(([a,b])=>{const v=g(b);if(v)cfg[a]=v});
+ if(moteur==='next')cfg.next=true;
+ const pieges=code.split('\n').filter(l=>/^\s*--/.test(l)&&/(piège|attention|important|bug|403|429|cloudflare|verrou|premium|lazy|data-src|limite|brouill|API|JSON)/i.test(l)&&!/GPL|FORK|fork/.test(l)).map(l=>l.replace(/^\s*--+\s*/,'').slice(0,140)).slice(0,6);
+ return{id,moteur,type:cfg.type,signature:moteur==='next'?'self.__next_f':moteur==='madara'?'wp-manga':moteur==='wpjson'?'/wp-json/':'',structure:'',pieges,config:cfg,local:true}}
+$('#memlua').onclick=()=>$('#memf').click();
+$('#memf').onchange=async e=>{const l=KBL();let n=0;
+ for(const f of e.target.files){const t=await f.text();if(!/ext:(parseNovel|searchNovels)|function ext/.test(t)){continue}
+  const x=luaLesson(f.name,t);l.examples=(l.examples||[]).filter(y=>y.id!==x.id).concat([x]);n++}
+ LS.set('kb_local',l);loadKB();e.target.value='';$('#memout').textContent=n?('✔ '+n+' fichier(s) appris.'):'Aucun fichier d\'extension reconnu.'};
+$('#memexp').onclick=()=>dl('knowledge.json',JSON.stringify({version:1,updated:new Date().toISOString().slice(0,10),examples:KB.map(({local,...x})=>x),lecons:LECONS.map(({local,...x})=>x)},null,1));
+$('#memclr').onclick=()=>{if(confirm('Oublier ce que l\'IA a appris dans ce navigateur ? (les connaissances du site restent)')){localStorage.removeItem('kb_local');loadKB();$('#memout').textContent='Mémoire locale effacée.'}};
 // ---------- catalogue
 let SRC=[];
 // sources du manifeste = déjà vérifiées par toi => « testé » ; sources envoyées par les utilisateurs => « non vérifié »
@@ -435,7 +476,7 @@ async function aiFixes(R){R.ai=true;
  if(!await aiOn()){R.noai=true;return}
  try{const c=cfg(),g=genLua(c),st=stageOf(R.msg),org=siteBase();
   const body=fit({site:org,probleme:R.msg,config:{type:c.type,name:c.name,lang:c.lang,search:c.search,list:c.list,chap:c.chap,cont:c.cont,img:c.img,rev:c.rev?1:0,browse:c.browse,next:!!c.next,moteur:c.engine||''},diagnostics:[digest(st,org)].filter(Boolean),lua:luaPart(g.code,[st])},11000);
-  const o=await aiAsk(REPSYS,body,pickExamples(CFG.engine||detectEngine(DBG.home?.html||''),CFG.type,DBG.home?.html||''));
+  const o=await aiAsk(REPSYS,body,pickExamples(CFG.engine||detectEngine(DBG.home?.html||''),CFG.type,DBG.home?.html||''),pickLessons(R.msg));
   if(typeof o.cause=='string'&&!R.cause)R.cause=o.cause.slice(0,240);
   (Array.isArray(o.reparations)?o.reparations:[]).slice(0,3).forEach(f=>{if(!f||typeof f!='object')return;const titre=sf(f.titre,120);if(!titre)return;
    if(f.type=='demander'&&['accueil','recherche','liste','fiche','chapitre'].includes(f.page))R.fixes.push({titre,type:'demander',page:f.page,consigne:sf(f.consigne,200)||'Montre-moi cette page.'});
@@ -460,7 +501,7 @@ async function tryRepair(i,box,titre,fn){const R=REPX[i],snap=JSON.parse(JSON.st
  box.innerHTML='<span class="sp"></span> Je teste la réparation…';
  let t;try{readAdv();fn();t=await runTests(cfg())}catch(e){CFG=snap;R.n++;showFix(i,box,'Échec : '+e.message);return}
  const nb=t.filter(x=>x[0]=='e').length;
- if(!t.some(x=>x[1]==R.msg)&&nb<=before){FIXMSG=[['ok','Réparé : '+titre+(nb?' — il reste '+nb+' problème(s) : clique sur « 🪄 Réparer » à côté.':'')]];renderResult(t,LASTINFO,true)}
+ if(!t.some(x=>x[1]==R.msg)&&nb<=before){learnFix(R.msg,R.cause,titre);FIXMSG=[['ok','Réparé : '+titre+(nb?' — il reste '+nb+' problème(s) : clique sur « 🪄 Réparer » à côté.':'')]];renderResult(t,LASTINFO,true)}
  else{CFG=snap;R.n++;showFix(i,box,"Ça n'a pas marché : j'ai tout remis comme avant. Voici une autre idée.")}}
 async function askRepair(i,box){const R=REPX[i],f=R.fixes[R.n],g=k=>box.querySelector('[data-a="'+k+'"]'),T={accueil:'home',recherche:'search',liste:'list',fiche:'novel',chapitre:'chapter'}[f.page];
  const u=g('u').value.trim(),w=g('w')?g('w').value.trim():'';let html=g('h').value;
@@ -1194,9 +1235,10 @@ return ext
 `,meta:`{ id = "${id}", name = "${ls(c.name)}", site = "${ls(c.base)}", lang = "${ls(c.lang)}", version = "${ls(c.ver)}", runtime = "lua"${man?', type = "manga"':''} },`}}
 const PXB=()=>PROXY;
 async function aiOn(){try{return !!(await (await fetch(PXB()+'/ai')).json()).ai}catch{return false}}
-async function aiAsk(system,prompt,examples){
+async function aiAsk(system,prompt,examples,lessons){
  const body={system,prompt};
  if(Array.isArray(examples)&&examples.length)body.examples=examples.slice(0,3);
+ if(Array.isArray(lessons)&&lessons.length)body.lessons=lessons.slice(0,3).map(l=>({symptome:l.symptome,cause:l.cause,solution:l.solution}));
  const r=await fetch(PXB()+'/ai',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
  const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||'Erreur IA '+r.status);
  const m=String(j.text||'').match(/\{[\s\S]*\}/);if(!m)throw new Error('Réponse IA illisible');
@@ -2060,7 +2102,7 @@ async function fixLoop(t,say,max=3){
   say('Tentative '+i+'/'+max+' : correction par l\'IA…');
 let o;try{
   const ex=pickExamples(detectEngine(DBG.home?.html||''),CFG.type,DBG.home?.html||'');
-  o=await aiAsk(FIXSYS,body,ex)
+  o=await aiAsk(FIXSYS,body,ex,pickLessons(bad.map(x=>x[1])))
 }catch(e){aiWhy='Correction IA impossible : '+e.message;hist.push({k:'e',m:'Tentative '+i+'/'+max+' : '+aiWhy});break}
   const before=snap(),gd=guard(o);applyCfg(gd.o);
   const now=snap(),ch=KEYS.filter(k=>String(before[k])!=String(now[k])).map(k=>k+' : « '+String(before[k]||'(vide)').slice(0,40)+' » → « '+String(now[k]||'(vide)').slice(0,40)+' »');
@@ -2072,6 +2114,7 @@ let o;try{
   t=await runTests(cfg());const nb=t.filter(x=>x[0]=='e').length;
   hist.push({k:nb?(nb<bad.length?'w':'e'):'ok',m:'Tentative '+i+'/'+max+' : '+(why?why+' — ':'')+ch.join(' ; ')+rj+' → échecs '+bad.length+' → '+nb});
   if(nb<best.n||!nb)best={t,cfg:snap(),n:nb};
+  if(nb<bad.length)learnFix(bad.map(x=>x[1]),why,ch.join(' ; '));
   if(!nb)break}
  // si la dernière tentative est pire que la meilleure, on revient à la meilleure
  if(t!==best.t&&t.filter(x=>x[0]=='e').length>best.n){CFG=best.cfg;t=best.t;hist.push({k:'w',m:'Retour aux meilleurs réglages trouvés ('+best.n+' échec(s)).'})}
