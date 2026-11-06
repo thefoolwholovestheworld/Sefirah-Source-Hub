@@ -142,6 +142,13 @@ function mergeKB(){
  KB=site.concat(auto,l.examples||[]);LECONS=(j&&Array.isArray(j.lecons)?j.lecons:[]).concat(l.lecons||[]);memInfo()}
 function loadKB(){fetch('sources/knowledge.json').then(r=>r.ok?r.json():null).then(j=>{KBSITE=j;mergeKB()}).catch(()=>{KBSITE=null;mergeKB()})}
 loadKB();
+// site déjà dans le catalogue ET dans la base de connaissances : on réutilise sa config prouvée
+function knownCfg(org){try{const h=new URL(org).hostname.replace(/^www\./,'');
+ const src=SRC.find(x=>{try{return new URL(x.site).hostname.replace(/^www\./,'')===h}catch{return false}});
+ const sld=h.split('.').slice(-2,-1)[0]||'';
+ const k=KB.find(x=>src?x.id===src.id:x.id===sld);return k&&k.config?k:null}catch{return null}}
+function applyKnown(k,org){const c=k.config,o={};['type','list','chap','cont'].forEach(x=>{if(c[x])o[x]=c[x]});
+ if(c.search)o.search=/^https?:\/\//.test(c.search)?c.search:org+c.search;applyCfg(o);if(c.next)CFG.next=true}
 function pickExamples(engine,type,html){
  if(!KB.length)return [];
  const H_=String(html||'');
@@ -149,7 +156,7 @@ function pickExamples(engine,type,html){
    (ex.moteur&&engine&&ex.moteur===engine?100:0)+
    (ex.type&&type&&ex.type===type?20:0)+
    (ex.signature&&H_&&H_.includes(ex.signature)?50:0)
- })).filter(x=>x.s>0).sort((a,b)=>b.s-a.s).slice(0,3).map(x=>x.ex);
+ })).filter(x=>x.s>=50).sort((a,b)=>b.s-a.s).slice(0,3).map(x=>x.ex);
 }
 // leçons de réparation : celles dont le symptôme correspond au message d'échec (3 au maximum)
 function pickLessons(msgs){
@@ -165,6 +172,8 @@ function learnFix(msgs,cause,change){
   if((l.lecons||[]).some(x=>x.symptome===sym&&x.solution===change))return;
   l.lecons=(l.lecons||[]).concat([{symptome:sym,cause:String(cause||'').slice(0,160),solution:String(change).slice(0,200),local:true}]).slice(-60);
   LS.set('kb_local',l);LECONS.push(l.lecons[l.lecons.length-1]);memInfo()}catch{}}
+// vérifie qu'une image répond (statut seulement) via le mode probe du Worker : le Worker refuse de relayer les images elles-mêmes (415)
+async function probeImg(u){const r=await fetch(PROXY+'?probe=1&url='+encodeURIComponent(u),{signal:AbortSignal.timeout?AbortSignal.timeout(20000):undefined});return{status:r.status}}
 async function getPage(url){const px=PROXY;let err;const im=IMP[nk(url)];if(im!=null)return{status:200,text:im};
  try{const r=await fetch(url);return {status:r.status,text:await r.text()}}catch(e){err=e}
  // via le proxy : 1 nouvel essai si le Worker répond 502 (coupure ponctuelle), sauf refus de sécurité
@@ -637,6 +646,8 @@ function expandUrl(tpl,sel,term,page,join){
 const SKIPN=/^(page|paged|pg|p|per_?page|perpage|limit|offset|q|s|search|keyword|query|term|csrf|_token|nonce|submit|action|lang|language)$/i;
 const NOALL=/^(tous|toutes|tout|all|any|--?|—|…|\.\.\.|choisir.*|select.*|sélectionner.*)$/i;
 const PGP=/^(page|paged|pg|p|pagina|pageno)$/i,NOQ=/^(q|s|search|keyword|query|term|k)$/i;
+// boutons « voir plus / tout afficher » : ce ne sont pas des valeurs de filtre (ex. « المزيد » pris pour un genre sur seanovel)
+const MORELBL=/^\s*(?:المزيد|عرض المزيد|عرض الكل|الكل|more|see more|show more|view more|view all|see all|load more|voir plus|voir tout|afficher plus|ver más|ver todo|mehr|alle anzeigen|xem thêm|lihat semua|もっと見る|更多|查看更多)\s*[»›>…\.]*\s*$/i;
 function detectFilters(d,org,pageUrl){
  const list=[],keys=new Set(),pu=pageUrl||org+'/';
  let page0=org+'/';try{const x=new URL(pu,org+'/');if(x.origin==org)page0=x.origin+x.pathname}catch{}
@@ -674,6 +685,7 @@ function detectFilters(d,org,pageUrl){
  const qg={},pg={};
  d.querySelectorAll('a[href]').forEach(a=>{let x;try{x=new URL(a.getAttribute('href'),org+'/')}catch{return}if(x.origin!=org)return;
   const t=sf((a.textContent||'').replace(/\(\s*\d+\s*\)\s*$/,''),40);
+  if(MORELBL.test(t))return;
   [...x.searchParams].forEach(([k,v])=>{if(!v||v.length>40||SKIPN.test(skey(k))||/^\d{3,}$/.test(v))return;
    const e=qg[x.pathname+'|'+k]=qg[x.pathname+'|'+k]||{path:x.pathname,param:k,vals:new Map()};if(!e.vals.has(v))e.vals.set(v,t||v)});
   const m=x.pathname.match(/^\/(genres?|categor(?:y|ies)|tags?|status|statut|types?|country|pays|order|sort|tri)\/([^\/]+)\/?$/i);
@@ -1799,7 +1811,7 @@ async function runTests(c){
   if(man){
    const ic=c.img,im=[...cd.querySelectorAll('img')].filter(i=>!ic||(i.className||'').includes(ic));
    im.length?add('ok','Lecture : '+im.length+' images'):add('e','Lecture : aucune image'+(ic?' avec la classe « '+ic+' »':''));
-   if(im[0]){const u=new URL(im[0].getAttribute('data-src')||im[0].getAttribute('src'),base+'/').href;try{const r=await getPage(u);r.status<400?add('ok','Image 1 accessible (HTTP '+r.status+')'):add('e','Image 1 : HTTP '+r.status)}catch{add('w','Image 1 : accessibilité non vérifiable depuis le navigateur (Referer/CORS)')}}}
+   if(im[0]){const u=new URL(im[0].getAttribute('data-src')||im[0].getAttribute('src'),base+'/').href;try{const r=await probeImg(u);r.status<400?add('ok','Image 1 accessible (HTTP '+r.status+')'):add('e','Image 1 : HTTP '+r.status)}catch{add('w','Image 1 : accessibilité non vérifiable depuis le navigateur (Referer/CORS)')}}}
   else{
    const cc=c.cont,el=cc&&cd.querySelector('[class*="'+cc+'"]');
    if(!el){/__next_f|__NEXT_DATA__/.test(ch.text)?await nm(ch.text):add('e','Lecture : conteneur « '+(cc||'')+' » introuvable')}
@@ -2039,6 +2051,7 @@ say("Recherche d'API cachées…");let apis=[];try{apis=await probeApis(org,hp.t
   applyCfg(await aiAsk(AISYS,JSON.stringify(S),ex))
 }catch(e){ai=false;aiWhy='IA indisponible : '+e.message}}
   if(!CFG.search&&eng!='madara'&&eng!='wpjson'){say("Recherche d'une API de recherche…");const sa=await probeSearchApi(org,CFG.lang);if(sa){CFG.apiSearch=sa;if(eng=='next'||apis.some(a=>a.id=='nextf'||a.id=='nextdata'))CFG.next=true}}
+  {const kn=knownCfg(org);if(kn){say("Source déjà connue ("+kn.id+") : config du catalogue réutilisée");applyKnown(kn,org)}}
   if(eng)applyEngine(eng);if(learned)applySet(learned);
   say('Recherche des filtres du site…');try{await autoFilters(org,hd)}catch{}
   say('Génération et test automatique…');
