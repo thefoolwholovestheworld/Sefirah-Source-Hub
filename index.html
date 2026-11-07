@@ -173,7 +173,7 @@ function learnFix(msgs,cause,change){
   l.lecons=(l.lecons||[]).concat([{symptome:sym,cause:String(cause||'').slice(0,160),solution:String(change).slice(0,200),local:true}]).slice(-60);
   LS.set('kb_local',l);LECONS.push(l.lecons[l.lecons.length-1]);memInfo()}catch{}}
 // vérifie qu'une image répond (statut seulement) via le mode probe du Worker : le Worker refuse de relayer les images elles-mêmes (415)
-async function probeImg(u){const r=await fetch(PROXY+'?probe=1&url='+encodeURIComponent(u),{signal:AbortSignal.timeout?AbortSignal.timeout(20000):undefined});return{status:r.status}}
+async function probeImg(u){const r=await fetch(PROXY+'?probe=1&ref='+encodeURIComponent(siteBase())+'&url='+encodeURIComponent(u),{signal:AbortSignal.timeout?AbortSignal.timeout(20000):undefined});return{status:r.status}}
 async function getPage(url){const px=PROXY;let err;const im=IMP[nk(url)];if(im!=null)return{status:200,text:im};
  try{const r=await fetch(url);return {status:r.status,text:await r.text()}}catch(e){err=e}
  // via le proxy : 1 nouvel essai si le Worker répond 502 (coupure ponctuelle), sauf refus de sécurité
@@ -1811,7 +1811,7 @@ async function runTests(c){
   if(man){
    const ic=c.img,im=[...cd.querySelectorAll('img')].filter(i=>!ic||(i.className||'').includes(ic));
    im.length?add('ok','Lecture : '+im.length+' images'):add('e','Lecture : aucune image'+(ic?' avec la classe « '+ic+' »':''));
-   if(im[0]){const u=new URL(im[0].getAttribute('data-src')||im[0].getAttribute('src'),base+'/').href;try{const r=await probeImg(u);r.status<400?add('ok','Image 1 accessible (HTTP '+r.status+')'):add('e','Image 1 : HTTP '+r.status)}catch{add('w','Image 1 : accessibilité non vérifiable depuis le navigateur (Referer/CORS)')}}}
+   if(im[0]){const u=new URL(im[0].getAttribute('data-src')||im[0].getAttribute('src'),base+'/').href;try{const r=await probeImg(u);r.status<400?add('ok','Image 1 accessible (HTTP '+r.status+')'):[401,403,415,429].includes(r.status)?add('w','Image 1 : HTTP '+r.status+(r.status==415?' (le Worker déployé est ancien : redéploie worker.js)':' (probablement une protection Referer : le .lua envoie le Referer)')):add('e','Image 1 : HTTP '+r.status)}catch{add('w','Image 1 : accessibilité non vérifiable depuis le navigateur (Referer/CORS)')}}}
   else{
    const cc=c.cont,el=cc&&cd.querySelector('[class*="'+cc+'"]');
    if(!el){/__next_f|__NEXT_DATA__/.test(ch.text)?await nm(ch.text):add('e','Lecture : conteneur « '+(cc||'')+' » introuvable')}
@@ -2006,6 +2006,140 @@ async function autoFilters(org,hd){
  const miss=ok.filter(f=>!(CFG.browse||'').includes('{'+f.key+'}'));
  CFG.browse=(CFG.browse||(u0+'?page={page}'))+miss.map(f=>'&'+f.param+'={'+f.key+'}').join('');
  FIXMSG.push(['ok','Filtres trouvés et testés tout seuls sur '+u0.replace(org,'')+' : '+ok.map(f=>f.label+(f.options.length>2?' ('+(f.options.length-(f.multi?0:1))+')':'')).join(', ')])}
+
+// ---------- 🤖 AUTONOMIE : le Hub explore le site tout seul (œuvre → chapitres → lecture) et répare sans IA
+const GENERIC_CLS=/^(container|wrapper|row|col[-\w]*|main|content-wrapper|page|site[-\w]*|inner|section|clearfix|box|body|layout|app|root|wp-[-\w]*|post-\d+)$/i;
+const CONTRE=/content|chapter|chap|text|read|entry|body|article|novel|story|chr/i;
+const NOWORK2=/^\/(category|categories|tag|tags|genre|genres|author|authors|page|pages|wp-content|wp-json|wp-includes|feed|blog|news|forum|user|users|profile|login|register|contact|about|privacy|terms|dmca|search|latest|popular|rss|sitemap|cdn-cgi|account|auth|api|bookmarks?|history|settings|ranking|rankings|list|lists)\//i;
+const LANGSEG=/^[a-z]{2}(-[a-z]{2})?$/i;
+let DISCSKIP=new Set();
+// préfixe commun des liens d'œuvres : /novel/ ou /fr/roman/
+function workPrefix(p){const s=p.split('/').filter(Boolean);if(s.length<2)return '';if(LANGSEG.test(s[0])&&s.length>=3)return '/'+s[0]+'/'+s[1]+'/';return '/'+s[0]+'/'}
+// si un lien ressemble à un chapitre (…/oeuvre/chapitre-12), on remonte à la fiche
+function workOf(p){const s=p.split('/').filter(Boolean);if(s.length>=3&&/(\d|chap|chapter|episode|ep-|cap)/i.test(s[s.length-1])&&!LANGSEG.test(s[0]))return '/'+s.slice(0,-1).join('/');return p}
+function workGroups(d,org){const g={};
+ lnk(d,org).forEach(([p])=>{const k=workPrefix(p);if(!k||NOWORK2.test(k))return;(g[k]=g[k]||[]).push(p)});
+ return Object.entries(g).filter(([k,a])=>a.length>=3).sort((a,b)=>b[1].length-a[1].length).slice(0,6)}
+// fragments d'adresse qui désignent les chapitres sur une fiche œuvre (du plus probable au moins probable)
+function chapFrags(wd,org,workPath){
+ const ls=lnk(wd,org).filter(([p])=>p!=workPath&&p.length>1);if(ls.length<3)return [];
+ const out=new Map(),CT=/(chap|chapitre|chapter|cap[ií]tulo|capitolo|kapitel|[ée]pisode|ep\.?|ch\.?|فصل|الفصل|章|話|화|глава)\s*\.?\s*#?\d+/i;
+ const tl=ls.filter(([p,t])=>CT.test(t)||/^#?\d+$/.test(t.trim()));
+ const put=f=>{if(!f||f.length<3||f.length>60||out.has(f))return;const hit=ls.filter(([p])=>p.includes(f));if(hit.length<3)return;
+  const th=tl.filter(([p])=>p.includes(f)).length,num=p=>+(p.match(/(\d+(?:\.\d+)?)\D*$/)||[0,0])[1];
+  out.set(f,{chap:f,n:hit.length,th,rev:num(hit[0][0])>num(hit[hit.length-1][0])?1:0,score:th*3+hit.length+(f.length>5?1:0),first:hit[Math.min(1,hit.length-1)][0]})};
+ const g=chapGuess(ls);if(g)put(g.chap);
+ tl.slice(0,4).forEach(([p])=>{const s=p.split('/').filter(Boolean);s.slice(0,-1).forEach(x=>put('/'+x+'/'));const st=s.at(-1).replace(/\d.*$/,'');put(st);const st2=s.at(-1).replace(/\d+.*$/,'').replace(/[-_]$/,'');if(st2.length>=3)put(st2)});
+ // liens frères dans un même dossier (chapitres sans chiffre dans l'adresse)
+ const dirs={};ls.forEach(([p])=>{const s=p.split('/').filter(Boolean);if(s.length>=3){const k='/'+s.slice(0,-1).join('/')+'/';(dirs[k]=dirs[k]||[]).push(p)}});
+ Object.entries(dirs).filter(([k,a])=>a.length>=5).sort((a,b)=>b[1].length-a[1].length).slice(0,2).forEach(([k])=>put('/'+k.split('/').filter(Boolean)[0]+'/'));
+ return [...out.values()].sort((a,b)=>b.score-a.score).slice(0,4)}
+// conteneur du texte d'un chapitre : classe réelle, vérifiée sur la page
+function pickCont(d){const out=[];
+ d.querySelectorAll('div,article,section,main').forEach(e=>{
+  const kids=[...e.children],pc=kids.filter(c=>c.tagName=='P').length,br=kids.filter(c=>c.tagName=='BR').length;
+  if(pc<4&&br<8)return;const len=(e.textContent||'').trim().length;if(len<600)return;
+  if(e.querySelectorAll('a').length>pc*2+12)return;
+  let cls='';
+  for(let x=e,i=0;x&&x.tagName!='BODY'&&i<4;x=x.parentElement,i++){
+   if(i&&(x.textContent||'').length>len*1.4+400)break;
+   const cs=(x.getAttribute('class')||'').split(/\s+/).filter(tok).filter(c=>!GENERIC_CLS.test(c));
+   cls=cs.find(c=>CONTRE.test(c))||cs[0]||'';if(cls)break}
+  if(!cls)return;
+  const m=d.querySelector('[class*="'+cls+'"]');if(!m)return;
+  const ml=(m.textContent||'').trim().length;if(ml<500||ml>len*1.6+800)return;   // la classe ne doit pas attraper un grand bloc voisin
+  out.push({cls,pc:pc+br/2,len})});
+ out.sort((a,b)=>b.pc-a.pc||b.len-a.len);return out[0]||null}
+// que contient la page d'un chapitre ? texte, images (manga) ou flux Next.js
+function chapKind(d,html){
+ const c=pickCont(d);if(c)return{kind:'novel',cont:c.cls,info:c.pc+' paragraphes'};
+ const im=imgCls(d).filter(([k,n])=>n>=5&&!/logo|avatar|icon|thumb|cover|banner/i.test(k));
+ if(im.length)return{kind:'manga',img:im[0][0],info:im[0][1]+' images'};
+ if(rscStream(html||'').length>500)return{kind:'next',info:'flux Next.js'};
+ return null}
+async function probeChapter(url,org){let p;try{p=await getPage(url)}catch{return null}
+ if(p.status>=400||blocked(p)||p.text.length<400)return null;return chapKind(dom(p.text),p.text)}
+// exploration : pour chaque famille de liens de l'accueil, ouvre une fiche, cherche les chapitres, ouvre un chapitre et vérifie qu'il se lit
+async function autoDiscover(org,hd,u,eng,say){
+ const res={ok:false,notes:[]};say=say||(()=>{});
+ const word=CFG.lang=='fr'?'amour':'love';
+ const tryDoc=async(d,label)=>{
+  const groups=workGroups(d,org).filter(([k])=>!DISCSKIP.has(k));
+  if(!groups.length)res.notes.push(label+' : aucun groupe de liens d\'œuvres');
+  for(const [prefix,paths] of groups.slice(0,4)){
+   const cnt={};paths.forEach(p=>{const w=workOf(p);cnt[w]=(cnt[w]||0)+1});
+   const works=Object.keys(cnt).sort((a,b)=>a.split('/').length-b.split('/').length||cnt[b]-cnt[a]).slice(0,2);
+   DISCSKIP.add(prefix);
+   for(const wp of works){
+    say('Exploration : fiche '+wp.slice(0,40)+'…');
+    let w;try{w=await getPage(org+wp)}catch{continue}
+    if(w.status>=400||blocked(w)||w.text.length<400)continue;
+    const wd=dom(w.text),frags=chapFrags(wd,org,wp);
+    if(!frags.length){
+     if(rscStream(w.text).length>500){res.notes.push(prefix+' : site Next.js');return{ok:true,list:prefix,chap:'',rev:0,kind:'next',work:wp,notes:res.notes}}
+     res.notes.push(prefix+wp+' : aucun lien de chapitre sur la fiche');continue}
+    for(const f of frags.slice(0,3)){
+     say('Exploration : chapitre « '+f.chap+' »…');
+     const k=await probeChapter(org+f.first,org);
+     if(k)return{ok:true,list:prefix,chap:f.chap,rev:f.rev,kind:k.kind,cont:k.cont||'',img:k.img||'',work:wp,found:f.n+' chapitres, '+k.info,notes:res.notes};
+     res.notes.push('« '+f.chap+' » : chapitre illisible')}}}
+  return null};
+ let r=await tryDoc(hd,'accueil');
+ if(!r&&CFG.search){try{const q=await getPage(CFG.search.replace('{q}',encodeURIComponent(word)).replace('{page}','1'));
+  if(q.status<400&&!blocked(q)){DISCSKIP=new Set();r=await tryDoc(dom(q.text),'recherche')}}catch{}}
+ if(!r&&!CFG.search){const s=await probeSearchHtml(org,CFG.lang,'');if(s){CFG.search=s;res.search=s;
+  try{const q=await getPage(s.replace('{q}',encodeURIComponent(word)).replace('{page}','1'));DISCSKIP=new Set();if(q.status<400)r=await tryDoc(dom(q.text),'recherche')}catch{}}}
+ return r||res}
+function applyDisc(d){if(!d||!d.ok)return;
+ if(d.list)CFG.list=d.list;if(d.chap)CFG.chap=d.chap;CFG.rev=!!d.rev;
+ if(d.kind=='manga'){CFG.type='manga';CFG.img=d.img||'';CFG.cont=''}
+ else if(d.kind=='novel'){CFG.type='novel';CFG.cont=d.cont||'';CFG.img=''}
+ else if(d.kind=='next')CFG.next=true}
+// recherche HTML : essaie les adresses de recherche les plus courantes et garde celle qui renvoie de vraies œuvres (et autre chose pour un mot absurde)
+async function probeSearchHtml(org,lang,prefix){
+ const w=lang=='fr'?'amour':'love',zz='zzqxjvk';
+ const pats=['/?s={q}','/search?q={q}','/search?keyword={q}','/search?query={q}','/search?search={q}','/search?name={q}','/?s={q}&post_type=wp-manga','/search/{q}','/?q={q}','/recherche?q={q}','/?search={q}','/?keyword={q}','/novels?search={q}','/novels?q={q}','/series?search={q}','/manga?search={q}','/browse?q={q}','/catalogue?search={q}','/search.php?q={q}','/search?title={q}'];
+ const set=(txt)=>new Set(lnk(dom(txt),org).map(x=>x[0]).filter(p=>prefix?p.includes(prefix):(workPrefix(p)&&!NOWORK2.test(workPrefix(p)))));
+ const one=async g=>{try{const a=await getPage(org+g.replace('{q}',encodeURIComponent(w)).replace('{page}','1'));
+   if(a.status>=400||blocked(a)||a.text.length<400)return null;
+   const sa=set(a.text);if(sa.size<2)return null;
+   let sb=new Set();try{const b=await getPage(org+g.replace('{q}',zz).replace('{page}','1'));if(b.status<400)sb=set(b.text)}catch{}
+   if([...sa].every(p=>sb.has(p)))return null;return g}catch{return null}};
+ for(let i=0;i<pats.length;i+=5){const r=(await Promise.all(pats.slice(i,i+5).map(one))).find(Boolean);if(r)return org+r}
+ return ''}
+// boucle de réparation SANS IA : propose des corrections vérifiées, retest, garde seulement ce qui améliore
+const scoreT=t=>t.filter(x=>x[0]=='e').length*10+(hasProof(t)?0:12);
+async function heurLoop(t,say,max=5){
+ const hist=[],tried=new Set(),org=siteBase(),snap=()=>JSON.parse(JSON.stringify(CFG));
+ for(let i=1;i<=max;i++){
+  let bad=t.filter(x=>x[0]=='e');if(!bad.length&&hasProof(t))break;
+  if(!bad.length)bad=t.filter(x=>x[0]=='w'||x[0]=='s');
+  const msgs=bad.map(x=>x[1]),has=re=>msgs.some(m=>re.test(m));
+  if(has(/protégé|anti-bot|bloquée|HTTP 5\d\d/)){hist.push({k:'w',m:'Site protégé ou en panne : pas de correction automatique (le Hub ne contourne pas les protections).'});break}
+  if(has(/Madara :/)||has(/rendu par JavaScript/))break;
+  const D=k=>DBG[k]&&DBG[k].html?dom(DBG[k].html):null,cand=[];
+  msgs.forEach(m=>{const q=quickFix(m);if(q)cand.push({titre:q.titre,run:async()=>applySetFull(q.set)})});
+  if(has(/Accueil : aucun lien|aucune œuvre trouvée|non testés|Aucun lien de chapitre|Fiche, chapitres|Next\.js : aucune liste/)||!hasProof(t)){
+   cand.push({titre:'Explorer à nouveau le site (autre famille de liens d\'œuvres)',run:async()=>{
+    const hd=D('home');if(!hd)throw new Error('accueil absent');const d=await autoDiscover(org,hd,org,CFG.engine,say);
+    if(!d.ok)throw new Error((d.notes||[]).join(' ; ')||'rien de plus trouvé');applyDisc(d)}})}
+  if(has(/Recherche non testée|Recherche : 0 résultat/)){
+   cand.push({titre:'Chercher l\'adresse de recherche du site',run:async()=>{const s=await probeSearchHtml(org,CFG.lang,CFG.list);if(!s)throw new Error('aucune adresse de recherche courante ne répond');CFG.search=s}})}
+  if(has(/conteneur « .* » introuvable|texte très court|Lecture : aucune image/)){
+   cand.push({titre:'Relire le chapitre pour trouver le texte ou les images',run:async()=>{const d=D('chapitre');if(!d)throw new Error('chapitre absent');
+    const k=chapKind(d,DBG.chapitre.html);if(!k)throw new Error('ni texte ni images lisibles');
+    if(k.kind=='next'){CFG.next=true;return}applyDisc({ok:true,kind:k.kind,cont:k.cont,img:k.img,rev:CFG.rev})}})}
+  const c=cand.find(x=>!tried.has(x.titre));if(!c)break;
+  tried.add(c.titre);const before=snap(),sb=scoreT(t);
+  say('Réparation automatique '+i+'/'+max+' : '+c.titre.slice(0,60)+'…');
+  try{await c.run()}catch(e){CFG=before;hist.push({k:'w',m:c.titre+' — sans résultat : '+String(e.message||e).slice(0,140)});continue}
+  const t2=await runTests(cfg()),sa=scoreT(t2);
+  if(sa<sb){hist.push({k:sa==0?'ok':'w',m:c.titre+' → échecs '+t.filter(x=>x[0]=='e').length+' → '+t2.filter(x=>x[0]=='e').length+(hasProof(t2)?' (œuvres et lecture vérifiées)':'')});t=t2}
+  else{CFG=before;DBG=DBG;hist.push({k:'w',m:c.titre+' — essayé, pas mieux : annulé'})}
+ }
+ // les tests de la dernière config gardée alimentent DBG (diagnostics de l'IA) : on les rejoue si on est revenu en arrière
+ return {t,hist}}
+
 async function generate(){
  const o=$('#cmsg'),btn=$('#cai'),say=m=>{o.innerHTML='<span class="sp"></span> '+H(m)};
  $('#cout').innerHTML='';
@@ -2027,12 +2161,15 @@ const {p:hp,d:hd,url:homeUrl}=await analyzeHome(u);
 if(homeUrl&&homeUrl!==u){u=homeUrl;$('#cu').value=u}
 say("Recherche d'API cachées…");let apis=[];try{apis=await probeApis(org,hp.text,hd)}catch{}
   const eng=detectEngine(hp.text)||(apis.some(a=>a.id=='wpjson')?'wpjson':'');
+  DISCSKIP=new Set();let disc=null;
+  if(eng!='madara'&&eng!='wpjson'){say("Exploration du site : œuvre → chapitres → lecture…");try{disc=await autoDiscover(org,hd,u,eng,say);if(disc&&disc.ok)applyDisc(disc)}catch(e){console.warn('autoDiscover',e)}}
   const hl=lnk(hd,org),lp0=CFG.list;
   // filtres vus sur l'accueil (selects, cases, liens répétés) : proposés à l'utilisateur, jamais ajoutés sans son choix (hors IA)
   try{DET=detectFilters(hd,org,u);PROP={list:DET.list.slice(),browse:DET.browse}}catch{}
   const S={site:org,apis:apis.map(a=>({type:a.id,url:a.url,note:a.note})),apiHints:CFG.apiHints||[],accueil:{url:u,formulaires:[...hd.querySelectorAll('form')].slice(0,3).map(f=>f.outerHTML.replace(/\s+/g,' ').slice(0,500)),liens:hl.slice(0,30),filtres:DET.list.map(f=>({key:f.key,label:f.label,multi:f.multi,nb:f.options.length,choix:f.options.slice(0,15).map(x=>x.label)})),adresseListeVue:DET.browse}};
+  if(disc&&disc.ok)S.decouverte={liste:disc.list,chapitres:disc.chap,type:disc.kind,verifie:disc.found||'ok'};
   const w=hl.find(([p])=>lp0&&p.includes(lp0)&&p.split('/').filter(Boolean).length>=2);
-  if(w){try{
+  if(w&&!(disc&&disc.ok&&disc.chap)){try{
    say("Lecture d'une fiche œuvre…");
    const wl=lnk(dom((await getPage(org+w[0])).text),org),g=chapGuess(wl.filter(([p])=>p!=w[0]));
    S.oeuvre={chemin:w[0],liens:wl.slice(0,40),devine:g};
@@ -2048,15 +2185,17 @@ say("Recherche d'API cachées…");let apis=[];try{apis=await probeApis(org,hp.t
  if(ai){say("Analyse par l'IA…");try{
   const ex=pickExamples(eng,CFG.type,hp.text);
   if(ex.length)say("Analyse par l'IA (exemples : "+ex.map(x=>x.id).join(', ')+")…");
-  applyCfg(await aiAsk(AISYS,JSON.stringify(S),ex))
+  applyCfg(await aiAsk(AISYS,JSON.stringify(S),ex));if(disc&&disc.ok)applyDisc(disc)
 }catch(e){ai=false;aiWhy='IA indisponible : '+e.message}}
   if(!CFG.search&&eng!='madara'&&eng!='wpjson'){say("Recherche d'une API de recherche…");const sa=await probeSearchApi(org,CFG.lang);if(sa){CFG.apiSearch=sa;if(eng=='next'||apis.some(a=>a.id=='nextf'||a.id=='nextdata'))CFG.next=true}}
+  if(!CFG.search&&!CFG.apiSearch&&eng!='madara'&&eng!='wpjson'){say("Recherche de l'adresse de recherche du site…");try{const hs=await probeSearchHtml(org,CFG.lang,CFG.list);if(hs)CFG.search=hs}catch{}}
   {const kn=knownCfg(org);if(kn){say("Source déjà connue ("+kn.id+") : config du catalogue réutilisée");applyKnown(kn,org)}}
   if(eng)applyEngine(eng);if(learned)applySet(learned);
   say('Recherche des filtres du site…');try{await autoFilters(org,hd)}catch{}
   say('Génération et test automatique…');
-  let t=await runTests(cfg()),loop=null;
-  if(ai&&t.some(x=>x[0]=='e')){const r=await fixLoop(t,say);t=r.t;loop=r.hist;if(r.aiWhy)aiWhy=r.aiWhy}
+  let t=await runTests(cfg()),loop=[];
+  {const hr=await heurLoop(t,say);t=hr.t;loop=hr.hist}
+  if(ai&&t.some(x=>x[0]=='e')){const r=await fixLoop(t,say);t=r.t;loop=loop.concat(r.hist||[]);if(r.aiWhy)aiWhy=r.aiWhy}
   o.innerHTML='';renderResult(t,{ai,aiWhy,loop,apis});
  }catch(e){o.innerHTML=`<p class="e">✘ ${H(e.message)}</p>${fx(e.message,true)}`;
   try{const u=new URL($('#cu').value.trim());CFG.name=CFG.name||u.hostname.replace(/^www\./,'');renderResult([['e',e.message]],{ai:false,aiWhy:''})}catch{}}
@@ -2164,7 +2303,7 @@ let o;try{
  // si la dernière tentative est pire que la meilleure, on revient à la meilleure
  if(t!==best.t&&t.filter(x=>x[0]=='e').length>best.n){CFG=best.cfg;t=best.t;hist.push({k:'w',m:'Retour aux meilleurs réglages trouvés ('+best.n+' échec(s)).'})}
  return {t,hist,aiWhy}}
-const loopHtml=h=>!h||!h.length?'':`<div class="card" style="border-color:var(--a)"><b>🔁 Correction automatique</b><small> (test → diagnostic → correction, 3 tentatives au maximum)</small><ul style="margin:6px 0">${h.map(x=>`<li class="${x.k}">${{ok:'✔',w:'⚠',e:'✘'}[x.k]} ${H(x.m)}</li>`).join('')}</ul></div>`;
+const loopHtml=h=>!h||!h.length?'':`<div class="card" style="border-color:var(--a)"><b>🔁 Correction automatique</b><small> (test → diagnostic → correction, sans IA puis avec IA si besoin)</small><ul style="margin:6px 0">${h.map(x=>`<li class="${x.k}">${{ok:'✔',w:'⚠',e:'✘'}[x.k]} ${H(x.m)}</li>`).join('')}</ul></div>`;
 
 // ---------- 🆘 aide : le débutant colle le code source d'une page, le Hub le lit à sa place
 let DBG={};const PASTE={};let FIXMSG=[],LASTINFO={ai:false},PROP={list:[],browse:''},DET={list:[],browse:''};
@@ -2296,7 +2435,7 @@ async function batchRun(){
   draw(u);LASTT=null;$('#cu').value=u;
   try{await generate()}catch(e){}
   const t=LASTT||[],bad=t.filter(x=>x[0]=='e');
-  res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:'aucune œuvre ni chapitre lisible'}:{u,ok:true,m:'œuvres et chapitres lus'});
+  res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
  }
  draw(null);btn.disabled=false;
  out.querySelectorAll('button[data-u]').forEach(b=>b.onclick=async()=>{$('#cu').value=b.dataset.u;await generate();$('#cu').scrollIntoView()});
@@ -2688,7 +2827,7 @@ async function run(cont){
   draw(u);LASTT=null;$('#cu').value=u;
   try{await generate()}catch(e){}
   const t=LASTT||[],bad=t.filter(x=>x[0]=='e');
-  Q.res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:'aucune œuvre ni chapitre lisible'}:{u,ok:true,m:'œuvres et chapitres lus'});
+  Q.res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
   Q.pos++}
  draw(null);btn.disabled=false;
  out.querySelectorAll('button[data-u]').forEach(b=>b.onclick=async()=>{$('#cu').value=b.dataset.u;await generate();$('#cu').scrollIntoView()});
