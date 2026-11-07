@@ -174,7 +174,11 @@ export default {
         'Accept': 'text/html,application/xhtml+xml,application/json;q=0.8,*/*;q=0.5',
         'Accept-Language': 'fr,en;q=0.8,ar;q=0.6'
       };
-      if (u.searchParams.get('probe') === '1') hdrs['Referer'] = target.origin + '/';
+      if (u.searchParams.get('probe') === '1') {
+        let ref = target.origin + '/';
+        try { const r = new URL(u.searchParams.get('ref') || ''); if (r.protocol === 'https:' || r.protocol === 'http:') ref = r.origin + '/'; } catch {}
+        hdrs['Referer'] = ref;
+      }
       let current = target, response = null, lastErr = null;
       for (let hop = 0; hop <= 5; hop++) {
         let attempt = 0;
