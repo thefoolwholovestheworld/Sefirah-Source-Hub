@@ -689,7 +689,9 @@ function detectFilters(d,org,pageUrl){
   [...x.searchParams].forEach(([k,v])=>{if(!v||v.length>40||SKIPN.test(skey(k))||/^\d{3,}$/.test(v))return;
    const e=qg[x.pathname+'|'+k]=qg[x.pathname+'|'+k]||{path:x.pathname,param:k,vals:new Map()};if(!e.vals.has(v))e.vals.set(v,t||v)});
   const m=x.pathname.match(/^\/(genres?|categor(?:y|ies)|tags?|status|statut|types?|country|pays|order|sort|tri)\/([^\/]+)\/?$/i);
-  if(m){const w=m[1].toLowerCase(),e=pg[w]=pg[w]||{word:w,vals:new Map()},v=decodeURIComponent(m[2]);if(v.length<=40&&!e.vals.has(v))e.vals.set(v,t||v)}});
+  if(m){const w=m[1].toLowerCase(),e=pg[w]=pg[w]||{word:w,vals:new Map()},v=decodeURIComponent(m[2]);if(v.length<=40){const c=e.cnt=e.cnt||new Map(),mm=c.get(v)||new Map();if(t)mm.set(t,(mm.get(t)||0)+1);c.set(v,mm);if(!e.vals.has(v))e.vals.set(v,t||v)}}});
+ Object.values(pg).forEach(e=>{if(!e.cnt)return;const noise=/^(分类|全部分类|更多|查看更多|more|all|tous|voir tout|plus)$/i,sfx=/(推荐|完结|排行|榜)$/;
+  e.cnt.forEach((mm,v)=>{let best='',bs=-1e9;mm.forEach((n,tx)=>{const s=n*10-(noise.test(tx)?100:0)-(sfx.test(tx)?20:0)-tx.length/100;if(s>bs){bs=s;best=tx}});if(best)e.vals.set(v,best)})});
  Object.values(qg).filter(e=>e.vals.size>=3).sort((a,b)=>b.vals.size-a.vals.size).forEach(e=>
   mk(e.param,humanize(skey(e.param)),[...e.vals].map(([id,label])=>({id,label})),false,{param:e.param,sel:'',style:'query',base:org+e.path}));
  Object.values(pg).filter(e=>e.vals.size>=3).sort((a,b)=>b.vals.size-a.vals.size).forEach(e=>
@@ -1019,7 +1021,13 @@ local function expand(tpl, sel, term, page)
 end
 local function browse_url(page, options)
     if BROWSE == "" then return BASE .. "/" end
-    return expand(BROWSE, options and options.filters, "", page)
+    local sel = {}
+    for k, v in pairs((options and options.filters) or {}) do sel[k] = v end
+${popF.length?`    -- aucun choix de l'utilisateur : valeurs par défaut des filtres (sinon /sort/{genre}/ perdrait son genre)
+    for _, f in ipairs(POPULAR_FILTERS) do
+        if sel[f.key] == nil or sel[f.key] == "" then sel[f.key] = f.default end
+    end
+`:''}    return expand(BROWSE, sel, "", page)
 end
 
 `}
@@ -1101,12 +1109,17 @@ local function unnext(u)
     if not q then return u end
     return (q:gsub("%%(%x%x)", function(h) return string.char(tonumber(h, 16)) end))
 end
+-- adresse d'image inutilisable (img/None, null, undefined…)
+local function bad_cover(u)
+    local last = (u:gsub("[?#].*$", ""):match("([^/]*)$") or ""):lower()
+    return last == "" or last == "none" or last == "null" or last == "undefined" or last == "nan" or last == "false"
+end
 local function cover_of(img)
     if not img then return nil end
     for _, k in ipairs({ "data-src", "data-lazy-src", "data-original", "src", "srcset" }) do
         local u = attr(img, k)
         if k == "srcset" and u then u = u:match("^%s*(%S+)") end
-        if u and u ~= "" and not u:match("^data:") and not u:lower():find("placeholder", 1, true) and not u:lower():find("blank", 1, true) then
+        if u and u ~= "" and not u:match("^data:") and not u:lower():find("placeholder", 1, true) and not u:lower():find("blank", 1, true) and not bad_cover(u) then
             return abs(unnext(dec(u)))
         end
     end
@@ -1179,15 +1192,20 @@ local function parse_list(html)
         if href and is_work(href) then
             local k = norm(href)
             local img = inner_html:match("<img[^>]->")
-            local name = attr(tag, "title") or (img and attr(img, "alt"))
+            local title = attr(tag, "title")
+            if title == "" then title = nil end
+            local name = title or (img and attr(img, "alt"))
             if name and name ~= "" then name = dec(name) else name = txt(inner_html) end
+            -- un alt d'image se termine souvent par « 封面 » (couverture) : on l'enlève
+            if not title then name = name:gsub("封面$", ""):gsub("%s+$", "") end
             local cover = cover_of(img)
             local it = idx[k]
             if it then -- même œuvre déjà vue (autre lien, autre forme d'URL) : on complète seulement
+                if title and not it.titled then it.name = dec(title); it.titled = true end
                 if it.name == "" and name ~= "" then it.name = name end
                 if not it.cover and cover then it.cover = cover end
             else
-                it = { name = name, path = rel(href), cover = cover }
+                it = { name = name, path = rel(href), cover = cover, titled = title ~= nil }
                 idx[k] = it
                 out[#out+1] = it
             end
@@ -1195,6 +1213,18 @@ local function parse_list(html)
     end
     local res = {}
     for _, it in ipairs(out) do if it.name ~= "" then res[#res+1] = it end end
+    -- couvertures manquantes (liste sans image, image invalide) : og:image de la fiche, 8 au maximum pour rester rapide
+    local budget = 8
+    for _, it in ipairs(res) do
+        if not it.cover and budget > 0 then
+            budget = budget - 1
+            local ok, page = pcall(get, it.path)
+            if ok and page then
+                local og = page:match('property="og:image"[^>]-content="([^"]*)"') or page:match('content="([^"]*)"[^>]-property="og:image"')
+                if og and og ~= "" and not bad_cover(og) then it.cover = abs(dec(og)) end
+            end
+        end
+    end
     return res
 end
 
@@ -1229,7 +1259,7 @@ local function meta(html, path)
     -- description souvent tronquée (« … ») dans og:description : on cherche la version complète dans la page
     if og == "" or og:sub(-3) == "..." or og:sub(-3) == "…" or #og < 200 then
         local head = (og:gsub("%s+", " ")):sub(1, 25)
-        for _, k in ipairs({ "synopsis", "summary", "description", "resume", "story", "desc" }) do
+        for _, k in ipairs({ "synopsis", "summary", "description", "resume", "intro", "story", "desc" }) do
             local b = grab(html, k)
             if b and select(2, b:gsub("<a%s", "")) <= 3 then
                 local d = para(b)
@@ -1240,9 +1270,12 @@ local function meta(html, path)
             end
         end
     end
-    return { name = name, path = path,
-        cover = abs(dec(html:match('property="og:image"[^>]-content="([^"]*)"'))),
-        summary = summary, author = "", status = "", genres = {} }
+    local function ogp(p) return dec(html:match('property="' .. p .. '"[^>]-content="([^"]*)"') or html:match('content="([^"]*)"[^>]-property="' .. p .. '"') or "") end
+    local cv = abs(dec(html:match('property="og:image"[^>]-content="([^"]*)"')))
+    if cv and bad_cover(cv) then cv = nil end
+    local cat = ogp("og:novel:category")
+    return { name = name, path = path, cover = cv,
+        summary = summary, author = ogp("og:novel:author"), status = ogp("og:novel:status"), genres = cat ~= "" and { cat } or {} }
 end
 
 function ext:parseNovelMeta(path)
@@ -1255,15 +1288,29 @@ function ext:parseNovel(path)
     local m, ch, seen = meta(html, path), {}, {}
     for tag, inner_html in html:gmatch("(<a%s[^>]->)(.-)</a>") do
         local href = attr(tag, "href")
-        if href and is_chap(href) and not seen[norm(href)] then
-            seen[norm(href)] = true
+        if href and is_chap(href) then
+            local k = norm(href)
             local name = txt(inner_html)
             if name == "" then name = dec(attr(tag, "title") or "") end
-            if name == "" then name = "Chapitre " .. (#ch + 1) end
-            ch[#ch+1] = { name = name, path = rel(href) }
+            if seen[k] then -- même chapitre vu plusieurs fois (derniers chapitres + sommaire, bouton « Lire ») : on garde le titre le plus long
+                if #name > #seen[k].name then seen[k].name = name end
+            else
+                if name == "" then name = "Chapitre " .. (#ch + 1) end
+                seen[k] = { name = name, path = rel(href) }
+                ch[#ch+1] = seen[k]
+            end
         end
     end
-${c.rev?'    for i = 1, math.floor(#ch/2) do ch[i], ch[#ch+1-i] = ch[#ch+1-i], ch[i] end\n':''}    for i, c in ipairs(ch) do c.chapter_number = i end
+    -- si chaque adresse finit par un numéro unique (p12.html, chapter-12), on trie dessus : plus de liste mélangée
+    local sorted = #ch > 1
+    local nums = {}
+    for _, c in ipairs(ch) do
+        local n = tonumber(norm(c.path):match("(%d+)[^%d]*$"))
+        if not n or nums[n] then sorted = false break end
+        nums[n] = true; c.n = n
+    end
+    if sorted then table.sort(ch, function(a, b) return a.n < b.n end) end
+${c.rev?'    if not sorted then for i = 1, math.floor(#ch/2) do ch[i], ch[#ch+1-i] = ch[#ch+1-i], ch[i] end end\n':''}    for i, c in ipairs(ch) do c.chapter_number = i end
     m.chapters, m.totalPages = ch, 1
     return m
 end
@@ -2055,7 +2102,9 @@ function workGroups(d,org){const g={};
  return Object.entries(g).filter(([k,a])=>a.length>=3).sort((a,b)=>b[1].length-a[1].length).slice(0,6)}
 // fragments d'adresse qui désignent les chapitres sur une fiche œuvre (du plus probable au moins probable)
 function chapFrags(wd,org,workPath){
- const ls=lnk(wd,org).filter(([p])=>p!=workPath&&p.length>1);if(ls.length<3)return [];
+ let ls=lnk(wd,org).filter(([p])=>p!=workPath&&p.length>1);
+ {const wp=workPath.replace(/\/$/,'')+'/',under=ls.filter(([p])=>p.startsWith(wp));if(under.length>=3)ls=under}   // les chapitres sont presque toujours sous l'adresse de l'œuvre
+ if(ls.length<3)return [];
  const out=new Map(),CT=/(chap|chapitre|chapter|cap[ií]tulo|capitolo|kapitel|[ée]pisode|ep\.?|ch\.?|فصل|الفصل|章|話|화|глава)\s*\.?\s*#?\d+/i;
  const tl=ls.filter(([p,t])=>CT.test(t)||/^#?\d+$/.test(t.trim()));
  const put=f=>{if(!f||f.length<3||f.length>60||out.has(f))return;const hit=ls.filter(([p])=>p.includes(f));if(hit.length<3)return;
