@@ -211,7 +211,7 @@ export default {
         return new Response(null, { status: response.status, headers: { ...cors, 'Cache-Control': 'no-store' } });
       }
       const type = response.headers.get('content-type') || 'application/octet-stream';
-      if (!/(text\/html|application\/xhtml\+xml|text\/plain|application\/json|javascript)/i.test(type)) {
+      if (!/(text\/html|application\/xhtml\+xml|text\/plain|application\/json|javascript|\/xml|\+xml)/i.test(type)) {
         return new Response('Type de contenu non pris en charge (HTML, JSON, texte ou JavaScript public seulement).', { status: 415, headers: { ...cors, 'Content-Type': 'text/plain; charset=utf-8' } });
       }
       const reader = response.body && response.body.getReader();
