@@ -2012,7 +2012,7 @@ const GENERIC_CLS=/^(container|wrapper|row|col[-\w]*|main|content-wrapper|page|s
 const CONTRE=/content|chapter|chap|text|read|entry|body|article|novel|story|chr/i;
 const NOWORK2=/^\/(category|categories|tag|tags|genre|genres|author|authors|page|pages|wp-content|wp-json|wp-includes|feed|blog|news|forum|user|users|profile|login|register|contact|about|privacy|terms|dmca|search|latest|popular|rss|sitemap|cdn-cgi|account|auth|api|bookmarks?|history|settings|ranking|rankings|list|lists)\//i;
 const LANGSEG=/^[a-z]{2}(-[a-z]{2})?$/i;
-let DISCSKIP=new Set();
+let DISCSKIP=new Set(),DISCN=new Map(),DISCW=new Set();
 // préfixe commun des liens d'œuvres : /novel/ ou /fr/roman/
 function workPrefix(p){const s=p.split('/').filter(Boolean);if(s.length<2)return '';if(LANGSEG.test(s[0])&&s.length>=3)return '/'+s[0]+'/'+s[1]+'/';return '/'+s[0]+'/'}
 // si un lien ressemble à un chapitre (…/oeuvre/chapitre-12), on remonte à la fiche
@@ -2037,7 +2037,9 @@ function chapFrags(wd,org,workPath){
 // conteneur du texte d'un chapitre : classe réelle, vérifiée sur la page
 function pickCont(d){const out=[];
  d.querySelectorAll('div,article,section,main').forEach(e=>{
-  const kids=[...e.children],pc=kids.filter(c=>c.tagName=='P').length,br=kids.filter(c=>c.tagName=='BR').length;
+  const kids=[...e.children],br=kids.filter(c=>c.tagName=='BR').length;
+  let pc=kids.filter(c=>c.tagName=='P').length;kids.filter(c=>c.tagName=='DIV'||c.tagName=='SPAN'||c.tagName=='ARTICLE').forEach(k=>{pc+=[...k.children].filter(c=>c.tagName=='P').length});
+  const own=[...e.childNodes].filter(n=>n.nodeType==3).reduce((a,n)=>a+n.textContent.trim().length,0);pc=Math.max(pc,own/150);
   if(pc<4&&br<8)return;const len=(e.textContent||'').trim().length;if(len<600)return;
   if(e.querySelectorAll('a').length>pc*2+12)return;
   let cls='';
@@ -2064,12 +2066,12 @@ async function autoDiscover(org,hd,u,eng,say){
  const res={ok:false,notes:[]};say=say||(()=>{});
  const word=CFG.lang=='fr'?'amour':'love';
  const tryDoc=async(d,label)=>{
-  const groups=workGroups(d,org).filter(([k])=>!DISCSKIP.has(k));
+  const groups=workGroups(d,org).filter(([k])=>(DISCN.get(k)||0)<2);
   if(!groups.length)res.notes.push(label+' : aucun groupe de liens d\'œuvres');
   for(const [prefix,paths] of groups.slice(0,4)){
    const cnt={};paths.forEach(p=>{const w=workOf(p);cnt[w]=(cnt[w]||0)+1});
-   const works=Object.keys(cnt).sort((a,b)=>a.split('/').length-b.split('/').length||cnt[b]-cnt[a]).slice(0,2);
-   DISCSKIP.add(prefix);
+   const works=Object.keys(cnt).filter(w=>!DISCW.has(w)).sort((a,b)=>a.split('/').length-b.split('/').length||cnt[b]-cnt[a]).slice(0,2);
+   works.forEach(w=>DISCW.add(w));DISCN.set(prefix,(DISCN.get(prefix)||0)+1);if(!works.length)continue;
    for(const wp of works){
     say('Exploration : fiche '+wp.slice(0,40)+'…');
     let w;try{w=await getPage(org+wp)}catch{continue}
@@ -2086,15 +2088,43 @@ async function autoDiscover(org,hd,u,eng,say){
   return null};
  let r=await tryDoc(hd,'accueil');
  if(!r&&CFG.search){try{const q=await getPage(CFG.search.replace('{q}',encodeURIComponent(word)).replace('{page}','1'));
-  if(q.status<400&&!blocked(q)){DISCSKIP=new Set();r=await tryDoc(dom(q.text),'recherche')}}catch{}}
+  if(q.status<400&&!blocked(q)){r=await tryDoc(dom(q.text),'recherche')}}catch{}}
+ if(!r){say('Exploration : pages de listes du site…');try{for(const d of await harvestSources(org,hd)){r=await tryDoc(d,'liste');if(r)break}}catch{}}
+ if(!r){say('Exploration : sitemap du site…');try{const sm=await sitemapDoc(org);if(sm)r=await tryDoc(sm,'sitemap')}catch{}}
  if(!r&&!CFG.search){const s=await probeSearchHtml(org,CFG.lang,'');if(s){CFG.search=s;res.search=s;
-  try{const q=await getPage(s.replace('{q}',encodeURIComponent(word)).replace('{page}','1'));DISCSKIP=new Set();if(q.status<400)r=await tryDoc(dom(q.text),'recherche')}catch{}}}
+  try{const q=await getPage(s.replace('{q}',encodeURIComponent(word)).replace('{page}','1'));if(q.status<400)r=await tryDoc(dom(q.text),'recherche')}catch{}}}
  return r||res}
 function applyDisc(d){if(!d||!d.ok)return;
  if(d.list)CFG.list=d.list;if(d.chap)CFG.chap=d.chap;CFG.rev=!!d.rev;
  if(d.kind=='manga'){CFG.type='manga';CFG.img=d.img||'';CFG.cont=''}
  else if(d.kind=='novel'){CFG.type='novel';CFG.cont=d.cont||'';CFG.img=''}
  else if(d.kind=='next')CFG.next=true}
+
+// pages de listes du site (menu, /novels, /series…) : d'autres endroits où trouver des œuvres quand l'accueil n'en montre pas
+async function harvestSources(org,hd){
+ const nav=new Set(),fixed=['/novels','/novel','/series','/manga','/catalogue','/browse','/all','/library','/latest','/popular','/novel-list','/manga-list','/list','/romans','/explore','/rewayat','/روايات'];
+ lnk(hd,org).forEach(([p,t])=>{const s=p.split('/').filter(Boolean);if(s.length<=2&&/novel|manga|manhwa|manhua|series|serie|catalog|browse|library|list|roman|latest|popular|ranking|all|rewaya|comic|webtoon|روايات|رواية|مانهوا|مانجا|قائمة|أعمال/i.test(p+' '+t))nav.add(p)});
+ const paths=[...nav,...fixed.filter(p=>!nav.has(p))].slice(0,10),docs=[];
+ for(let i=0;i<paths.length;i+=5){
+  const r=await Promise.all(paths.slice(i,i+5).map(async p=>{try{const a=await getPage(org+p);if(a.status>=400||blocked(a)||a.text.length<800)return null;const d=dom(a.text);return lnk(d,org).length>=6?d:null}catch{return null}}));
+  r.forEach(d=>d&&docs.push(d));if(docs.length>=4)break}
+ return docs}
+// sitemap : liste directe des adresses d'œuvres, sans dépendre du rendu de l'accueil
+async function sitemapDoc(org){
+ const locs=t=>[...t.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map(m=>m[1].replace(/&amp;/g,'&').replace(/"/g,'')),urls=[];
+ let maps=[];
+ try{const r=await getPage(org+'/robots.txt');if(r.status<400)maps=[...r.text.matchAll(/^sitemap:\s*(\S+)/gim)].map(m=>m[1])}catch{}
+ if(!maps.length)maps=[org+'/sitemap.xml',org+'/sitemap_index.xml',org+'/wp-sitemap.xml'];
+ const sc=x=>(/novel|manga|series|comic|post|webtoon|roman|rewaya/i.test(x)?2:0)-(/chapter|chap|category|tag|author|user|page-sitemap|image/i.test(x)?3:0);
+ for(const m of maps.slice(0,3)){
+  try{const r=await getPage(m);if(r.status>=400)continue;const l=locs(r.text);
+   if(l.some(x=>/\.xml(\?|$)/i.test(x))){
+    for(const s of l.filter(x=>/\.xml/i.test(x)).sort((a,b)=>sc(b)-sc(a)).slice(0,3)){try{const rr=await getPage(s);if(rr.status<400)urls.push(...locs(rr.text))}catch{}}
+   }else urls.push(...l);
+   if(urls.length>20)break}catch{}}
+ const ok=urls.filter(x=>{try{return new URL(x).origin==org}catch{return false}}).slice(0,800);
+ if(ok.length<5)return null;
+ return dom('<body>'+ok.map(x=>'<a href="'+x+'">'+(x.split('/').filter(Boolean).pop()||'x').slice(0,30)+'</a>').join('')+'</body>')}
 // recherche HTML : essaie les adresses de recherche les plus courantes et garde celle qui renvoie de vraies œuvres (et autre chose pour un mot absurde)
 async function probeSearchHtml(org,lang,prefix){
  const w=lang=='fr'?'amour':'love',zz='zzqxjvk';
@@ -2161,7 +2191,7 @@ const {p:hp,d:hd,url:homeUrl}=await analyzeHome(u);
 if(homeUrl&&homeUrl!==u){u=homeUrl;$('#cu').value=u}
 say("Recherche d'API cachées…");let apis=[];try{apis=await probeApis(org,hp.text,hd)}catch{}
   const eng=detectEngine(hp.text)||(apis.some(a=>a.id=='wpjson')?'wpjson':'');
-  DISCSKIP=new Set();let disc=null;
+  DISCSKIP=new Set();DISCN=new Map();DISCW=new Set();let disc=null;
   if(eng!='madara'&&eng!='wpjson'){say("Exploration du site : œuvre → chapitres → lecture…");try{disc=await autoDiscover(org,hd,u,eng,say);if(disc&&disc.ok)applyDisc(disc)}catch(e){console.warn('autoDiscover',e)}}
   const hl=lnk(hd,org),lp0=CFG.list;
   // filtres vus sur l'accueil (selects, cases, liens répétés) : proposés à l'utilisateur, jamais ajoutés sans son choix (hors IA)
@@ -2435,7 +2465,7 @@ async function batchRun(){
   draw(u);LASTT=null;$('#cu').value=u;
   try{await generate()}catch(e){}
   const t=LASTT||[],bad=t.filter(x=>x[0]=='e');
-  res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
+  res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>(x[0]=='w'||x[0]=='s')&&!/^Avis|couverture|Recherche non testée/.test(x[1]))||t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
  }
  draw(null);btn.disabled=false;
  out.querySelectorAll('button[data-u]').forEach(b=>b.onclick=async()=>{$('#cu').value=b.dataset.u;await generate();$('#cu').scrollIntoView()});
@@ -2827,7 +2857,7 @@ async function run(cont){
   draw(u);LASTT=null;$('#cu').value=u;
   try{await generate()}catch(e){}
   const t=LASTT||[],bad=t.filter(x=>x[0]=='e');
-  Q.res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
+  Q.res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>(x[0]=='w'||x[0]=='s')&&!/^Avis|couverture|Recherche non testée/.test(x[1]))||t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
   Q.pos++}
  draw(null);btn.disabled=false;
  out.querySelectorAll('button[data-u]').forEach(b=>b.onclick=async()=>{$('#cu').value=b.dataset.u;await generate();$('#cu').scrollIntoView()});
