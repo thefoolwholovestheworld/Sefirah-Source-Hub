@@ -1023,7 +1023,11 @@ local function browse_url(page, options)
 end
 
 `}
-function genLua(c){const id=c.name.toLowerCase().replace(/[^a-z0-9]/g,'')||'source',man=c.type=='manga',nx=!!c.next&&c.type!='manga';
+// nom du fichier = nom du site : ixdzs8.com → ixdzs8.lua, free.kolnovel.com → freekolnovel.lua
+function siteId(c){try{let h=new URL(c.base||c.site||'').hostname.toLowerCase().replace(/^www\./,'').split('.');
+ if(h.length>2&&/^(co|com|org|net|gov|edu)$/.test(h[h.length-2]))h.pop();h.pop();
+ return h.join('').replace(/[^a-z0-9]/g,'')}catch{return ''}}
+function genLua(c){const id=siteId(c)||c.name.toLowerCase().replace(/[^a-z0-9]/g,'')||'source',man=c.type=='manga',nx=!!c.next&&c.type!='manga';
 const fl=c.filters||[],fx=fl.length>0||!!c.browse,popF=fl.filter(f=>f.where!='search'),seaF=fl.filter(f=>f.where!='browse');
 return {id,code:`-- ${c.name} — source générée par Sefirah Source Hub (modèle sans IA). À relire et tester.
 -- Contrat : voir extensions/mangapill.lua du plugin Sefirah.
@@ -1144,11 +1148,35 @@ local function grab(html, cls)
     end
 end
 
+-- liste et chapitres sous le même préfixe (ex. /read/123/ et /read/123/p4.html) : l'œuvre est le lien court, le chapitre le lien long
+local function after_list(h)
+    local s, e = norm(h):find(LISTP:lower(), 1, true)
+    if not s then return nil end
+    return norm(h):sub(e + 1)
+end
+local function is_work(h)
+    if LISTP == "" or not h:find(LISTP, 1, true) then return false end
+    if CHAPP ~= "" and h:find(CHAPP, 1, true) then
+        if CHAPP ~= LISTP then return false end
+        local a = after_list(h)
+        return a ~= nil and a ~= "" and not a:find("/", 1, true)
+    end
+    return true
+end
+local function is_chap(h)
+    if CHAPP == "" or not h:find(CHAPP, 1, true) then return false end
+    if CHAPP == LISTP then
+        local a = after_list(h)
+        return a ~= nil and a:find("/", 1, true) ~= nil
+    end
+    return true
+end
+
 local function parse_list(html)
     local out, idx = {}, {}
     for tag, inner_html in html:gmatch("(<a%s[^>]->)(.-)</a>") do
         local href = attr(tag, "href")
-        if href and LISTP ~= "" and href:find(LISTP, 1, true) and not (CHAPP ~= "" and href:find(CHAPP, 1, true)) then
+        if href and is_work(href) then
             local k = norm(href)
             local img = inner_html:match("<img[^>]->")
             local name = attr(tag, "title") or (img and attr(img, "alt"))
@@ -1174,7 +1202,7 @@ ${fx?filtersLua(c):''}local ext = { id = "${id}", name = "${ls(c.name)}", site =
     popularFilters = ${popF.length?'POPULAR_FILTERS':'{}'}, searchFilters = ${seaF.length?'SEARCH_FILTERS':'{}'}, hasReviews = ${c.rvm?'true':'false'},${c.rvm?' maxReviews = 150,':''} chapterCommentsPanel = false }
 
 function ext:popularNovels(page${fx?', options':''})
-    local html, err = get(${fx?'browse_url(page, options)':'BASE .. "${ls(c.homePath||'/')}"'})
+    local html, err = get(${fx?'browse_url(page, options)':'BASE .. "'+ls(c.homePath||'/')+'"'})
     if not html then return { novels = {}, error = "Site injoignable (" .. tostring(err) .. ")" } end
     return { novels = parse_list(html) }
 end
@@ -1227,7 +1255,7 @@ function ext:parseNovel(path)
     local m, ch, seen = meta(html, path), {}, {}
     for tag, inner_html in html:gmatch("(<a%s[^>]->)(.-)</a>") do
         local href = attr(tag, "href")
-        if href and CHAPP ~= "" and href:find(CHAPP, 1, true) and not seen[norm(href)] then
+        if href and is_chap(href) and not seen[norm(href)] then
             seen[norm(href)] = true
             local name = txt(inner_html)
             if name == "" then name = dec(attr(tag, "title") or "") end
@@ -1693,6 +1721,9 @@ async function runTests(c){
  const gd=async(k,u)=>{const p=await getPage(u);DBG[k]={url:u,status:p.status,html:p.text};return p};
  const base=c.base,list=c.list,chap=c.chap,man=c.type=='manga';
  const links=(d,pre)=>[...d.querySelectorAll('a[href]')].filter(a=>(a.getAttribute('href')||'').includes(pre));
+ const afterList=(h,l)=>{const n=h.replace(/^https?:\/\/[^\/]+/,'').replace(/[?#].*$/,'').replace(/\/+$/,'').toLowerCase(),i=n.indexOf(l.toLowerCase());return i<0?null:n.slice(i+l.length)};
+ const workLinks=(d,l,ch)=>links(d,l).filter(a=>{const h=a.getAttribute('href')||'';if(!ch||!h.includes(ch))return true;if(ch!=l)return false;const x=afterList(h,l);return x!=null&&x!==''&&!x.includes('/')});
+ const chapLinks=(d,l,ch)=>links(d,ch).filter(a=>{if(ch!=l)return true;const x=afterList(a.getAttribute('href')||'',l);return x!=null&&x.includes('/')});
  const abs=h=>new URL(h,base+'/').href;
  // même clé de comparaison que la fonction norm() du .lua généré
  const normP=h=>{try{return new URL(h,base+'/').pathname.replace(/\/+$/,'').toLowerCase()}catch{return String(h)}};
@@ -1733,7 +1764,7 @@ async function runTests(c){
   p.status<400?add('ok','Le site répond (HTTP '+p.status+')'):add('e','HTTP '+p.status);
   if(p.text.length<500)add('w','Page d\'accueil quasi vide ('+p.text.length+' car.)');
   moji(p.text)?add('e','Accents mal encodés (mojibake) détectés'):add('ok','Encodage : pas de caractères corrompus');
-  const h=links(dom(p.text),list);
+  const h=workLinks(dom(p.text),list,c.chap);
   h.length?add('ok','Accueil : '+h.length+' liens d\'œuvres'):add('w','Accueil : aucun lien contenant « '+list+' »');
   let first;
   if(c.engine=='wpjson'){
@@ -1794,10 +1825,10 @@ async function runTests(c){
     const d=(K.nkChap&&objs2.find(x=>x[0]==K.nkChap)&&(K.nkPara||K.nkContent))?{}:discoverChapter(objs2);
     if(d){Object.assign(K,d);const o=(objs2.find(x=>x[0]==K.nkChap)||[])[1]||{};
      const tx=K.nkPara?(o[K.nkPara]||[]).map(p=>typeof p=='string'?p:(p&&p[K.nkText])||'').join(' '):String(o[K.nkContent]||'');
-     tx.length>500?add('ok','Lecture : texte extrait de « '+K.nkChap+' » ('+tx.length+' car.)'):add('w','Lecture : texte très court ('+tx.length+' car.)')}
+     tx.length>minTxt(tx)?add('ok','Lecture : texte extrait de « '+K.nkChap+' » ('+tx.length+' car.)'):add('w','Lecture : texte très court ('+tx.length+' car.)')}
     else add('e','Lecture : texte du chapitre introuvable dans le flux Next.js')}
    Object.assign(CFG,K,{next:true})};
-  const cl=chap?links(fd,chap):[];
+  const cl=chap?chapLinks(fd,list,chap):[];
   if(nextSite&&(c.next||!cl.length)){await nm();return R}
   if(!cl.length&&c.engine=='madara'){add('w','Madara : la liste des chapitres semble chargée en AJAX (/ajax/chapters/), non testable depuis le navigateur : à vérifier sur la liseuse');return R}
   if(!cl.length){add('e','Aucun lien de chapitre contenant « '+chap+' »');return R}
@@ -1815,7 +1846,7 @@ async function runTests(c){
   else{
    const cc=c.cont,el=cc&&cd.querySelector('[class*="'+cc+'"]');
    if(!el){/__next_f|__NEXT_DATA__/.test(ch.text)?await nm(ch.text):add('e','Lecture : conteneur « '+(cc||'')+' » introuvable')}
-   else{const n=el.textContent.trim().length;n>500?add('ok','Lecture : texte extrait ('+n+' car.)'):add('w','Lecture : texte très court ('+n+' car.)');el.querySelector('div')&&add('ok','Le conteneur contient des <div> imbriquées : gérées par le .lua généré')}}
+   else{const n=el.textContent.trim().length;n>minTxt(el.textContent)?add('ok','Lecture : texte extrait ('+n+' car.)'):add('w','Lecture : texte très court ('+n+' car.)');el.querySelector('div')&&add('ok','Le conteneur contient des <div> imbriquées : gérées par le .lua généré')}}
  }catch(e){add('e',e.message)}
  return R}
 
@@ -2012,6 +2043,8 @@ const GENERIC_CLS=/^(container|wrapper|row|col[-\w]*|main|content-wrapper|page|s
 const CONTRE=/content|chapter|chap|text|read|entry|body|article|novel|story|chr/i;
 const NOWORK2=/^\/(category|categories|tag|tags|genre|genres|author|authors|page|pages|wp-content|wp-json|wp-includes|feed|blog|news|forum|user|users|profile|login|register|contact|about|privacy|terms|dmca|search|latest|popular|rss|sitemap|cdn-cgi|account|auth|api|bookmarks?|history|settings|ranking|rankings|list|lists)\//i;
 const LANGSEG=/^[a-z]{2}(-[a-z]{2})?$/i;
+const cjkR=s=>{const m=s.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g);return m?m.length/Math.max(1,s.length):0};
+const minTxt=s=>cjkR(s)>0.3?120:500;
 let DISCSKIP=new Set(),DISCN=new Map(),DISCW=new Set();
 // préfixe commun des liens d'œuvres : /novel/ ou /fr/roman/
 function workPrefix(p){const s=p.split('/').filter(Boolean);if(s.length<2)return '';if(LANGSEG.test(s[0])&&s.length>=3)return '/'+s[0]+'/'+s[1]+'/';return '/'+s[0]+'/'}
@@ -2040,7 +2073,7 @@ function pickCont(d){const out=[];
   const kids=[...e.children],br=kids.filter(c=>c.tagName=='BR').length;
   let pc=kids.filter(c=>c.tagName=='P').length;kids.filter(c=>c.tagName=='DIV'||c.tagName=='SPAN'||c.tagName=='ARTICLE').forEach(k=>{pc+=[...k.children].filter(c=>c.tagName=='P').length});
   const own=[...e.childNodes].filter(n=>n.nodeType==3).reduce((a,n)=>a+n.textContent.trim().length,0);pc=Math.max(pc,own/150);
-  if(pc<4&&br<8)return;const len=(e.textContent||'').trim().length;if(len<600)return;
+  if(pc<4&&br<8)return;const tt=(e.textContent||'').trim(),len=tt.length;if(len<minTxt(tt)*1.2)return;
   if(e.querySelectorAll('a').length>pc*2+12)return;
   let cls='';
   for(let x=e,i=0;x&&x.tagName!='BODY'&&i<4;x=x.parentElement,i++){
@@ -2049,7 +2082,7 @@ function pickCont(d){const out=[];
    cls=cs.find(c=>CONTRE.test(c))||cs[0]||'';if(cls)break}
   if(!cls)return;
   const m=d.querySelector('[class*="'+cls+'"]');if(!m)return;
-  const ml=(m.textContent||'').trim().length;if(ml<500||ml>len*1.6+800)return;   // la classe ne doit pas attraper un grand bloc voisin
+  const ml=(m.textContent||'').trim().length;if(ml<minTxt(tt)||ml>len*1.6+800)return;   // la classe ne doit pas attraper un grand bloc voisin
   out.push({cls,pc:pc+br/2,len})});
  out.sort((a,b)=>b.pc-a.pc||b.len-a.len);return out[0]||null}
 // que contient la page d'un chapitre ? texte, images (manga) ou flux Next.js
