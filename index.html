@@ -2542,7 +2542,7 @@ async function batchRun(){
  if(urls.length>MAX){note+='<p class="w">'+urls.length+' sites trouvés : je teste les '+MAX+' premiers (change « max » pour en tester plus).</p>';urls=urls.slice(0,MAX)}
  if(!urls.length){out.innerHTML=note+'<p class="w">Aucun site trouvé dans ce que tu as collé.</p>';btn.disabled=false;return}
  const draw=(cur)=>{out.innerHTML=note+'<p>'+(cur?'<span class="sp"></span> Test '+(res.length+1)+'/'+urls.length+' : '+H(cur):'Terminé : '+res.filter(r=>r.ok).length+' site(s) qui marchent sur '+urls.length)+'</p>'
-  +res.map(r=>'<div>'+(r.ok?'✔':'✘')+' <a href="'+H(r.u)+'" target="_blank" rel="noopener">'+H(r.u)+'</a> — '+H(r.m)+(r.ok?' <button class="b" data-u="'+H(r.u)+'">Ouvrir</button>':'')+'</div>').join('')};
+  +res.map(r=>'<div>'+(r.ok?'✔':'✘')+' <a href="'+H(r.u)+'" target="_blank" rel="noopener">'+H(r.u)+'</a> — '+H(r.m)+' <button class="b" data-u="'+H(r.u)+'">Ouvrir</button>'+'</div>').join('')};
  for(const u of urls){
   draw(u);LASTT=null;$('#cu').value=u;
   try{await generate()}catch(e){}
@@ -2982,7 +2982,7 @@ async function run(cont){
  const draw=cur=>{const left=total-Q.pos,okn=Q.res.filter(r=>r.ok).length;
   out.innerHTML=Q.note+'<p>'+(cur?'<span class="sp"></span> Test '+(Q.res.length+1)+'/'+total+' : '+H(cur)
    :'Terminé pour ce paquet : '+okn+' site(s) qui marchent sur '+Q.res.length+' testé(s), '+total+' site(s) dans la liste.')+'</p>'
-   +Q.res.map(r=>'<div>'+(r.ok?'✔':'✘')+' <a href="'+H(r.u)+'" target="_blank" rel="noopener">'+H(r.u)+'</a> — '+H(r.m)+(r.ok?' <button class="b" data-u="'+H(r.u)+'">Ouvrir</button>':'')+'</div>').join('')
+   +Q.res.map(r=>'<div>'+(r.ok?'✔':'✘')+' <a href="'+H(r.u)+'" target="_blank" rel="noopener">'+H(r.u)+'</a> — '+H(r.m)+' <button class="b" data-u="'+H(r.u)+'">Ouvrir</button>'+'</div>').join('')
    +(!cur&&left>0?'<div class="row"><button class="b" id="bnx">⏭ Tester les '+Math.min(MAX,left)+' suivants (il en reste '+left+')</button></div>':'')};
  for(const u of part){
   draw(u);LASTT=null;$('#cu').value=u;
