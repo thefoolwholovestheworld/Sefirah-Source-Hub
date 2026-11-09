@@ -2909,7 +2909,7 @@ window.openPreview=open;
 (function(){
 let Q=null; // { urls, res, pos, note }
 const SKIP=/(^|\.)(github\.com|githubusercontent\.com|jsdelivr\.net|unpkg\.com|cloudflare\.com|googleapis\.com|gstatic\.com|w3\.org|schema\.org)$/i;
-// lecture d'une liste de sites : accepte JSON (n'importe quelle forme), .txt, .md, .csv
+// lecture d'une liste de sites : accepte JSON (n'importe quelle forme), .txt, .md, .csv et les index binaires .pb (protobuf, gzip)
 const URLKEY=/^(site|siteurl|site_url|baseurl|base_url|base|homepage|home|website|web|url|link|domain|host|hostname|origin)$/i;
 const BADEXT=/\.(apk|png|jpe?g|gif|webp|svg|ico|js|mjs|css|json|zip|lua|md|txt|xml|woff2?)$/i;
 // renvoie l'adresse d'accueil d'un site, ou null (images, fichiers, GitHub… sont ignorés)
@@ -2930,17 +2930,44 @@ function sitesFrom(text){
  }
  if(!out.length)(text.match(/https?:\/\/[^\s"'<>,)\\\]]+/gi)||[]).forEach(y=>{const s=asSite(y,false);if(s)out.push(s)});
  return out}
+// lecteur protobuf sans schéma : parcourt les champs et garde les textes qui sont des adresses
+function pbStrings(b,out,depth){let i=0;const n=b.length,dec=new TextDecoder();
+ const vr=()=>{let r=0,s=0,c;do{if(i>=n)throw 0;c=b[i++];r+=(c&127)*Math.pow(2,s);s+=7}while((c&128)&&s<64);return r};
+ while(i<n){const w=vr()&7;
+  if(w==0)vr();else if(w==1)i+=8;else if(w==5)i+=4;
+  else if(w==2){const L=vr();if(i+L>n)throw 0;const sub=b.subarray(i,i+L);i+=L;
+   const s=dec.decode(sub);
+   if(/^https?:\/\/[^\s\x00-\x1f]+$/.test(s))out.push(s);
+   else if(depth<6&&L>1){try{pbStrings(sub,out,depth+1)}catch{}}}
+  else throw 0}}
+async function readPb(u){
+ const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);
+ let buf=new Uint8Array(await r.arrayBuffer());
+ if(buf[0]==0x1f&&buf[1]==0x8b){
+  if(!window.DecompressionStream)throw new Error('ce navigateur ne sait pas décompresser le gzip');
+  buf=new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer())}
+ const out=[];try{pbStrings(buf,out,0)}catch{}
+ return{n:buf.length,sites:out.map(y=>asSite(y,false)).filter(Boolean)}}
 async function collect(){
  const found=($('#bl').value.match(/https?:\/\/[^\s"'<>,)]+/gi))||[],map=new Map();let note='';
  const add=s=>{try{const h=new URL(s).hostname.replace(/^www\./,'').toLowerCase();if(!map.has(h))map.set(h,s)}catch{}};
+ const uniqN=a=>new Set(a.map(s=>{try{return new URL(s).hostname.replace(/^www\./,'')}catch{return s}})).size;
  for(const x of found){let o;try{o=new URL(x)}catch{continue}
-  if(/\.(json|txt|md|csv)(\?|$)/i.test(o.pathname)||/githubusercontent\.com$/i.test(o.hostname)){
+  if(/\.(json|txt|md|csv|pb)(\?|$)/i.test(o.pathname)||/githubusercontent\.com$/i.test(o.hostname)){
    $('#bout').innerHTML='<p><span class="sp"></span> Lecture de la liste : '+H(x)+'</p>';
-   try{const p=await getPage(x);if(!p||!p.text||p.status>=400)throw new Error('HTTP '+(p&&p.status));
-    const sites=sitesFrom(p.text),uniq=new Set(sites.map(s=>{try{return new URL(s).hostname.replace(/^www\./,'')}catch{return s}}));
+   try{
+    let sites=[],size=0,head='';
+    if(/\.pb(\?|$)/i.test(o.pathname)){const q=await readPb(x);sites=q.sites;size=q.n}
+    else{const p=await getPage(x);if(!p||!p.text||p.status>=400)throw new Error('HTTP '+(p&&p.status));
+     sites=sitesFrom(p.text);size=p.text.length;head=p.text.slice(0,160);
+     // liste « JSON » vidée (ex. Keiyoushi) : le vrai index est dans index.pb, à côté
+     if(uniqN(sites)<3&&/index\.min\.json$/i.test(o.pathname)){
+      try{const q=await readPb(x.replace(/index\.min\.json(\?.*)?$/i,'index.pb'));
+       if(uniqN(q.sites)>=3){sites=q.sites;size=q.n;note+='<p class="ok">ℹ Le fichier index.min.json est vide : lecture de index.pb à la place.</p>'}}catch{}}}
     sites.forEach(add);
-    if(uniq.size>=3)note+='<p class="ok">✔ Liste lue ('+Math.round(p.text.length/1024)+' Ko) : '+uniq.size+' site(s) trouvé(s).</p>';
-    else note+='<p class="w">⚠ Cette liste ne contient presque pas d\'adresses de sites ('+uniq.size+' trouvé(s) dans '+Math.round(p.text.length/1024)+' Ko). Elle donne sans doute des noms sans adresse : prends une liste avec « site » ou « baseUrl ». Début du fichier : '+H(p.text.slice(0,160))+'</p>';
+    const k=uniqN(sites);
+    if(k>=3)note+='<p class="ok">✔ Liste lue ('+Math.round(size/1024)+' Ko) : '+k+' site(s) trouvé(s).</p>';
+    else note+='<p class="w">⚠ Cette liste ne contient presque pas d\'adresses de sites ('+k+' trouvé(s) dans '+Math.round(size/1024)+' Ko). Elle est sans doute vide ou donne des noms sans adresse : prends une liste avec « site » ou « baseUrl ».'+(head?' Début du fichier : '+H(head):'')+'</p>';
    }catch(e){note+='<p class="w">⚠ Liste illisible ('+H(x)+') : '+H(e.message)+'</p>'}
   }else{const s=asSite(x,false);if(s)add(s)}}
  return{urls:[...map.values()],note}}
