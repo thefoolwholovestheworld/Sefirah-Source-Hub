@@ -2547,7 +2547,7 @@ async function batchRun(){
   draw(u);LASTT=null;$('#cu').value=u;
   try{await generate()}catch(e){}
   const t=LASTT||[],bad=t.filter(x=>x[0]=='e');
-  res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>(x[0]=='w'||x[0]=='s')&&!/^Avis|couverture|Recherche non testée/.test(x[1]))||t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
+  res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>(x[0]=='w'||x[0]=='s')&&!/^Avis|couverture|Recherche non testée/.test(x[1]))||[0,(t.some(x=>x[0]=='ok'&&/^(Accueil : \d|Recherche : \d|Fiche : titre|Next\.js : (fiche|API))/.test(x[1]))?'œuvres trouvées':'aucune œuvre trouvée')+', '+(t.some(x=>x[0]=='ok'&&/^Lecture/.test(x[1]))?'texte lu':'aucun chapitre lu')+' : ouvre le site dans Créer puis « 🆘 Colle le code d\'une page »'])[1]).slice(0,140)}:{u,ok:true,m:'œuvres et chapitres lus'});
  }
  draw(null);btn.disabled=false;
  out.querySelectorAll('button[data-u]').forEach(b=>b.onclick=async()=>{$('#cu').value=b.dataset.u;await generate();$('#cu').scrollIntoView()});
@@ -2988,7 +2988,7 @@ async function run(cont){
   draw(u);LASTT=null;$('#cu').value=u;
   try{await generate()}catch(e){}
   const t=LASTT||[],bad=t.filter(x=>x[0]=='e');
-  Q.res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>(x[0]=='w'||x[0]=='s')&&!/^Avis|couverture|Recherche non testée/.test(x[1]))||t.find(x=>x[0]=='w'||x[0]=='s')||[0,'aucune œuvre ni chapitre lisible'])[1]).slice(0,110)}:{u,ok:true,m:'œuvres et chapitres lus'});
+  Q.res.push(!t.length?{u,ok:false,m:'aucun résultat'}:bad.length?{u,ok:false,m:bad[0][1].slice(0,110)}:!hasProof(t)?{u,ok:false,m:((t.find(x=>(x[0]=='w'||x[0]=='s')&&!/^Avis|couverture|Recherche non testée/.test(x[1]))||[0,(t.some(x=>x[0]=='ok'&&/^(Accueil : \d|Recherche : \d|Fiche : titre|Next\.js : (fiche|API))/.test(x[1]))?'œuvres trouvées':'aucune œuvre trouvée')+', '+(t.some(x=>x[0]=='ok'&&/^Lecture/.test(x[1]))?'texte lu':'aucun chapitre lu')+' : ouvre le site dans Créer puis « 🆘 Colle le code d\'une page »'])[1]).slice(0,140)}:{u,ok:true,m:'œuvres et chapitres lus'});
   Q.pos++}
  draw(null);btn.disabled=false;
  out.querySelectorAll('button[data-u]').forEach(b=>b.onclick=async()=>{$('#cu').value=b.dataset.u;await generate();$('#cu').scrollIntoView()});
