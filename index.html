@@ -40,9 +40,9 @@ h2.st{font-size:16px;margin:16px 0 4px}h2.st span{display:inline-grid;place-item
 <p style="margin:0 0 8px"><small>Les sources sans problème sont ajoutées automatiquement au catalogue, marquées « non vérifié ».</small></p>
 <div class="row"><input id="cu" type="url" placeholder="https://exemple.com" aria-label="Adresse du site" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="b" id="cai">✨ Générer le .lua</button></div>
 <details class="help" id="batch"><summary><b>🔎 Tester plusieurs sites d'un coup</b></summary>
-<p style="margin:8px 0"><small>Colle une liste d'adresses (une par ligne), ou l'adresse d'un fichier .json / .txt qui liste des sites (ex. liste de plugins) : le Hub en extrait les sites. Le Hub analyse chaque site l'un après l'autre et te donne la liste de ceux qui marchent.</small></p>
+<p style="margin:8px 0"><small>Colle une liste d'adresses (une par ligne), ou l'adresse d'un fichier .json / .txt qui liste des sites (ex. liste de plugins) : le Hub en extrait les sites. Le bouton « 🔗 Trouver les adresses » affiche tous les sites trouvés sans les tester (tu peux les copier ou les mettre dans la zone). Le Hub analyse chaque site l'un après l'autre et te donne la liste de ceux qui marchent.</small></p>
 <textarea id="bl" style="min-height:90px;width:100%" placeholder="https://site1.com&#10;https://site2.com"></textarea>
-<div class="row"><button class="b" id="bgo">▶ Tout tester</button><label style="margin-left:8px">max <input id="bmax" type="number" value="20" min="1" max="300" style="width:64px"></label></div><div id="bout"></div></details>
+<div class="row"><button class="b s" type="button" id="bfind">🔗 Trouver les adresses</button><button class="b" id="bgo">▶ Tout tester</button><label style="margin-left:8px">max <input id="bmax" type="number" value="20" min="1" max="300" style="width:64px"></label></div><div id="bout"></div></details>
 <details class="help" id="smp"><summary><b>📄 Plusieurs pages d'exemple (plus fiable) / importer un .mhtml</b></summary>
 <span class="hint">Colle 1 à 3 fiches et 1 à 3 chapitres : le Hub compare les pages et garde ce qui revient à chaque fois (préfixe des œuvres, des chapitres, classe du texte ou des images, ordre).</span>
 <label>Fiches d'œuvres (une adresse par ligne)</label><textarea id="cf" style="min-height:64px" placeholder="https://exemple.com/novel/une-oeuvre&#10;https://exemple.com/novel/une-autre"></textarea>
@@ -2930,6 +2930,18 @@ function sitesFrom(text){
  }
  if(!out.length)(text.match(/https?:\/\/[^\s"'<>,)\\\]]+/gi)||[]).forEach(y=>{const s=asSite(y,false);if(s)out.push(s)});
  return out}
+// clé d'un site pour comparer (sans « www. », en minuscules)
+const hostKey=u=>{try{return new URL(u).hostname.replace(/^www\./,'').toLowerCase()}catch{return ''}};
+// noms des sites quand la liste les donne (ex. plugins.min.json de LNReader : { name, site, … })
+function namesFrom(text){
+ const m=new Map();let json=null;try{json=JSON.parse(text)}catch{return m}
+ const walk=v=>{
+  if(Array.isArray(v))v.forEach(walk);
+  else if(v&&typeof v=='object'){
+   const nm=typeof v.name=='string'?v.name.trim().slice(0,60):'';
+   if(nm)for(const k in v){if(!URLKEY.test(k))continue;const st=asSite(v[k],true);if(st){const h=hostKey(st);if(h&&!m.has(h))m.set(h,nm);break}}
+   for(const k in v)walk(v[k])}};
+ walk(json);return m}
 // lecteur protobuf sans schéma : parcourt les champs et garde les textes qui sont des adresses
 function pbStrings(b,out,depth){let i=0;const n=b.length,dec=new TextDecoder();
  const vr=()=>{let r=0,s=0,c;do{if(i>=n)throw 0;c=b[i++];r+=(c&127)*Math.pow(2,s);s+=7}while((c&128)&&s<64);return r};
@@ -2949,6 +2961,7 @@ async function readPb(u){
  const out=[];try{pbStrings(buf,out,0)}catch{}
  return{n:buf.length,sites:out.map(y=>asSite(y,false)).filter(Boolean)}}
 async function collect(){
+ const names=new Map();
  const found=($('#bl').value.match(/https?:\/\/[^\s"'<>,)]+/gi))||[],map=new Map();let note='';
  const add=s=>{try{const h=new URL(s).hostname.replace(/^www\./,'').toLowerCase();if(!map.has(h))map.set(h,s)}catch{}};
  const uniqN=a=>new Set(a.map(s=>{try{return new URL(s).hostname.replace(/^www\./,'')}catch{return s}})).size;
@@ -2960,6 +2973,7 @@ async function collect(){
     if(/\.pb(\?|$)/i.test(o.pathname)){const q=await readPb(x);sites=q.sites;size=q.n}
     else{const p=await getPage(x);if(!p||!p.text||p.status>=400)throw new Error('HTTP '+(p&&p.status));
      sites=sitesFrom(p.text);size=p.text.length;head=p.text.slice(0,160);
+     namesFrom(p.text).forEach((v,k)=>{if(!names.has(k))names.set(k,v)});
      // liste « JSON » vidée (ex. Keiyoushi) : le vrai index est dans index.pb, à côté
      if(uniqN(sites)<3&&/index\.min\.json$/i.test(o.pathname)){
       try{const q=await readPb(x.replace(/index\.min\.json(\?.*)?$/i,'index.pb'));
@@ -2970,7 +2984,7 @@ async function collect(){
     else note+='<p class="w">⚠ Cette liste ne contient presque pas d\'adresses de sites ('+k+' trouvé(s) dans '+Math.round(size/1024)+' Ko). Elle est sans doute vide ou donne des noms sans adresse : prends une liste avec « site » ou « baseUrl ».'+(head?' Début du fichier : '+H(head):'')+'</p>';
    }catch(e){note+='<p class="w">⚠ Liste illisible ('+H(x)+') : '+H(e.message)+'</p>'}
   }else{const s=asSite(x,false);if(s)add(s)}}
- return{urls:[...map.values()],note}}
+ return{urls:[...map.values()],note,names}}
 async function run(cont){
  const btn=$('#bgo'),out=$('#bout'),MAX=Math.max(1,Math.min(300,parseInt($('#bmax').value)||20));
  if(!$('#bl').value.match(/https?:\/\//i)&&!(cont&&Q)){out.innerHTML='<p class="w">Colle au moins une adresse (https://…).</p>';return}
@@ -2995,6 +3009,30 @@ async function run(cont){
  const nx=$('#bnx');if(nx)nx.onclick=()=>run(true)}
 window.batchRun=()=>run(false);
 $('#bgo').onclick=()=>run(false);
+// « Trouver les adresses » : lit la liste collée (ou l'adresse d'un fichier .json) et affiche tous les sites, sans les tester
+async function findRun(){
+ const btn=$('#bfind'),out=$('#bout');
+ if(!$('#bl').value.match(/https?:\/\//i)){out.innerHTML='<p class="w">Colle au moins une adresse (https://…).</p>';return}
+ btn.disabled=true;
+ try{
+  const c=await collect(),urls=c.urls;
+  if(!urls.length){out.innerHTML=c.note+'<p class="w">Aucun site trouvé dans ce que tu as collé.</p>';return}
+  let have=new Set();try{have=new Set((SRC||[]).map(x=>hostKey(x&&x.site)).filter(Boolean))}catch{}
+  const isNew=u=>!have.has(hostKey(u)),fresh=urls.filter(isNew),nOld=urls.length-fresh.length;
+  out.innerHTML=c.note+'<p><b>'+urls.length+' site(s) trouvé(s)</b>'+(nOld?' : '+fresh.length+' nouveau(x), '+nOld+' déjà au catalogue':'')+'.</p>'
+   +'<div class="row"><button class="b" type="button" id="fcp">📋 Copier la liste</button><button class="b" type="button" id="fall">⬇ Tout mettre dans la zone</button>'
+   +(nOld&&fresh.length?'<button class="b" type="button" id="fnew">⬇ Seulement les '+fresh.length+' nouveaux</button>':'')+'</div>'
+   +'<ol style="max-height:340px;overflow:auto;padding-left:30px;margin:8px 0">'
+   +urls.map(u=>{const n=c.names.get(hostKey(u))||'';
+     return '<li>'+(n?H(n)+' — ':'')+'<a href="'+H(u)+'" target="_blank" rel="noopener">'+H(u)+'</a>'+(isNew(u)?'':' <span class="tag">déjà au catalogue</span>')+'</li>'}).join('')
+   +'</ol><p class="hint" id="fmsg"></p>';
+  const put=(list,b)=>{$('#bl').value=list.join('\n');Q=null;b.textContent='Mis dans la zone ✓';$('#fmsg').textContent='La liste est dans la zone ci-dessus : clique sur « ▶ Tout tester » (le champ « max » fixe combien de sites sont testés à la fois).'};
+  $('#fcp').onclick=function(){cp(urls.join('\n'),this)};
+  $('#fall').onclick=function(){put(urls,this)};
+  const fn=$('#fnew');if(fn)fn.onclick=function(){put(fresh,this)};
+ }catch(e){out.innerHTML='<p class="w">Impossible de lire la liste : '+H(e&&e.message||String(e))+'</p>'}
+ finally{btn.disabled=false}}
+$('#bfind').onclick=findRun;
 })();
 </script>
 
