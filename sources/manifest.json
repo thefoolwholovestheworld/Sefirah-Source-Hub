@@ -86,7 +86,7 @@
     },
     {
       "id": "cenele",
-      "name": "cenele",
+      "name": "Cenele",
       "lang": "ar",
       "type": "novel",
       "site": "https://cenele.com",
@@ -299,6 +299,17 @@
       "lastCheck": "2026-11-04",
       "file": "sources/ranobehub.lua",
       "icon": "sources/icons/ranobehub.png"
+    },
+    {
+      "id": "readnovel",
+      "name": "ReadNovel",
+      "lang": "en",
+      "type": "novel",
+      "site": "https://readnovel.eu",
+      "version": "0.3.0",
+      "license": "GPL-3.0",
+      "lastCheck": "2026-11-14",
+      "file": "sources/readnovel.lua"
     },
     {
       "id": "rewayahfans",
