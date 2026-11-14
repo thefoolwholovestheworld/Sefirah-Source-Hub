@@ -210,7 +210,7 @@ local function meta(html, path)
         summary = summary, author = "", status = "", genres = {} }
 end
 
-local ext = { id = "cenele", name = "cenele", site = BASE, lang = "ar", version = "0.3.3",
+local ext = { id = "cenele", name = "Cenele", site = BASE, lang = "ar", version = "0.3.3",
     popularFilters = {}, searchFilters = {}, hasReviews = false, chapterCommentsPanel = false }
 
 -- le site injecte des textes anti-copie (« هذا التطبيق يسرق… » + code hexadécimal, lettres étirées par des tatweel)
