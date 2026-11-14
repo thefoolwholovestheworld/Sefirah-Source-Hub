@@ -188,6 +188,32 @@
    }
   },
   {
+   "id": "readnovel",
+   "moteur": "next",
+   "type": "novel",
+   "lang": "en",
+   "signature": "__NEXT_DATA__",
+   "structure": "Next.js (pages router) : tout est dans <script id=\"__NEXT_DATA__\"> > props.pageProps. Fiche /novel/<slug> (pageProps.novel : title, description, author.name, status, genres[].name, chapterCount, coverKey ; pageProps.toc : items = chapitres, ranges = tranches de 100) ; chapitre /chapter/<slug>-<n> (pageProps.data.chapter.paragraphs) ; liste filtrée /category/<genre>?status=&sort=&page=N ou /browse sans genre ; recherche /search?q={q} ; avis par l'API tRPC /api/trpc/review.list.",
+   "pieges": [
+    "Ne pas parser le HTML rendu : lire le JSON de __NEXT_DATA__ (repli HTML seulement si le JSON manque)",
+    "La fiche ne liste que 100 chapitres par page : toc.ranges donne le nombre de tranches, puis charger <fiche>?page=N pour chaque tranche (plafonner à 80, un seul réessai par tranche, trier par numéro et dédoublonner)",
+    "Le chemin d'un chapitre se reconstruit : /chapter/<slug>-<numéro> ; ne pas lire les liens de la page",
+    "Texte du chapitre = pageProps.data.chapter.paragraphs (tableau de chaînes) à échapper en HTML ; repli : <p data-tts-paragraph=\"N\">, ce qui exclut les publicités",
+    "Œuvre = un seul segment après /novel/ ; ignorer les liens plus profonds (chapitres, tags)",
+    "Couvertures : /_next/image?url=XXX renvoie à l'image d'origine XXX (décoder) ; ignorer les images nommées None/null/undefined ; sans image, utiliser coverKey + « -480.webp » sur le CDN du site ou og:image de la fiche (8 fiches au maximum pour rester rapide)",
+    "og:description est souvent tronquée (« … ») : préférer pageProps.novel.description",
+    "Statut en MAJUSCULES dans l'adresse (ONGOING, COMPLETED, HIATUS, DROPPED) ; un filtre vide ou « all » = retirer le paramètre, et sans genre utiliser /browse",
+    "Avis : GET /api/trpc/review.list?batch=1&input=<JSON encodé> avec {\"0\":{\"json\":{\"novelId\":<id>,\"sort\":\"helpful\",\"rating\":null,\"limit\":10,\"cursor\":<nextCursor>,\"direction\":\"forward\"}}} ; lire [1].result.data.json.items et nextCursor ; mémoriser le curseur de chaque page ; si un tri deviné (newest/oldest) est refusé, se rabattre sur « helpful », seul tri confirmé"
+   ],
+   "config": {
+    "type": "novel",
+    "list": "/novel/",
+    "chap": "/chapter/",
+    "search": "/search?q={q}",
+    "next": true
+   }
+  },
+  {
    "id": "novelfrance",
    "moteur": "next",
    "type": "novel",
@@ -628,6 +654,26 @@
    "symptome": "Avis.*(/reviews|404)|mode page.*avis",
    "cause": "Le Hub a deviné une adresse d'avis qui n'existe pas (ex. {path}/reviews).",
    "solution": "Vérifier que l'adresse répond vraiment avec des commentaires avant de l'activer ; sinon désactiver l'onglet Avis (hasReviews = false) plutôt que d'afficher un onglet vide."
+  },
+  {
+   "symptome": "__NEXT_DATA__|pageProps|props\\.pageProps",
+   "cause": "Site Next.js en pages router : le contenu (fiche, chapitres, texte) est dans le JSON de <script id=\"__NEXT_DATA__\">, pas dans le HTML rendu.",
+   "solution": "Lire props.pageProps (novel, toc, data.chapter.paragraphs) avec un décodeur JSON ; garder le HTML seulement en repli (ex. <p data-tts-paragraph>)."
+  },
+  {
+   "symptome": "100 chapitres|\\?page=\\d+#chapters|tranche|toc\\.ranges|chapitres? par (page|tranche)",
+   "cause": "La fiche Next.js ne contient qu'une tranche de 100 chapitres ; les autres sont sur <fiche>?page=N.",
+   "solution": "Lire le nombre de tranches (toc.ranges, sinon les liens ?page=N#chapters), charger chaque page, réessayer une fois si elle échoue, puis trier par numéro et dédoublonner."
+  },
+  {
+   "symptome": "trpc|review\\.list|nextCursor|Avis.*(curseur|cursor)",
+   "cause": "Les avis viennent d'une API tRPC paginée par curseur, pas par numéro de page.",
+   "solution": "GET /api/trpc/review.list?batch=1&input=<JSON encodé> ({\"0\":{\"json\":{novelId, sort, rating:null, limit:10, cursor, direction:\"forward\"}}}) ; lire [1].result.data.json.items et nextCursor ; mémoriser le curseur par page ; si un tri deviné est refusé, utiliser « helpful »."
+  },
+  {
+   "symptome": "_next/image|couverture.*(None|null|undefined)|img/None",
+   "cause": "Couverture passée par l'optimiseur Next.js (/_next/image?url=…) ou valeur vide (None, null).",
+   "solution": "Décoder le paramètre url pour retrouver l'image d'origine ; ignorer les adresses se terminant par none/null/undefined ; en dernier recours lire og:image de la fiche (peu de fiches, pour rester rapide)."
   }
  ]
 }
