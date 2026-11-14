@@ -254,7 +254,7 @@ let SRC=[];
 function mergeCat(man,com){
  const ids=new Set((man||[]).map(x=>x.id)),t=(v,n)=>String(v==null?'':v).slice(0,n||80);
  const ok=x=>x&&typeof x=='object'&&/^[a-z0-9][a-z0-9_-]{1,39}$/.test(String(x.id))&&/^https?:\/\//i.test(String(x.site||''))&&!ids.has(x.id);
- const seen=new Set(),extra=(Array.isArray(com)?com:[]).filter(x=>ok(x)&&!seen.has(x.id)&&seen.add(x.id)).map(x=>({id:x.id,name:t(x.name)||x.id,
+ const seen=new Set(),extra=(Array.isArray(com)?com:[]).filter(x=>ok(x)&&!seen.has(x.id)&&seen.add(x.id)).map(x=>({id:x.id,name:capName(t(x.name)||x.id),
   lang:/^([a-z]{2,3}|multi)$/.test(String(x.lang))?x.lang:'multi',type:x.type=='manga'?'manga':'novel',site:t(x.site,300),version:/^[\w.+-]{1,20}$/.test(String(x.version))?x.version:'0.1.0',
   license:'—',status:'non vérifié',lastCheck:'',file:PROXY+'/catalogue/file/'+x.id+'.lua',community:true}));
  return (man||[]).map(x=>({...x,status:'testé'})).concat(extra)}
@@ -588,7 +588,8 @@ const NEWCFG=()=>({rvi:'',name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',l
  let CFG=NEWCFG(),LASTORG='';
 const siteBase=()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}};
 // cfg() : la configuration « propre » utilisée pour générer le .lua et pour les tests (filtres et adresse validés)
-const cfg=()=>{const base=siteBase();return {...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,apiList:chkBrowse(CFG.apiList,base).ok,rvm:CFG.rvo=='off'||!['wp','json','page','wpd'].includes(CFG.rvm)?'':CFG.rvm,rvu:sf(CFG.rvu,120),rvc:tok(CFG.rvc)?CFG.rvc:''}};
+const capName=n=>{n=String(n||'');return n.charAt(0).toLowerCase()!==n.charAt(0).toUpperCase()?n.charAt(0).toUpperCase()+n.slice(1):n}; // première lettre en majuscule (ex. cenele -> Cenele)
+const cfg=()=>{const base=siteBase();return {...CFG,name:capName(CFG.name||'MaSource'),lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,apiList:chkBrowse(CFG.apiList,base).ok,rvm:CFG.rvo=='off'||!['wp','json','page','wpd'].includes(CFG.rvm)?'':CFG.rvm,rvu:sf(CFG.rvu,120),rvc:tok(CFG.rvc)?CFG.rvc:''}};
 function applyCfg(o){
  if(!o||typeof o!='object')return;
  if(o.type=='novel'||o.type=='manga')CFG.type=o.type;
