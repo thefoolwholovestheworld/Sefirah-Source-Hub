@@ -588,7 +588,7 @@ const NEWCFG=()=>({rvi:'',name:'',lang:'fr',ver:'0.1.0',type:'novel',search:'',l
  let CFG=NEWCFG(),LASTORG='';
 const siteBase=()=>{try{return new URL($('#cu').value.trim()).origin}catch{return ''}};
 // cfg() : la configuration « propre » utilisée pour générer le .lua et pour les tests (filtres et adresse validés)
-const cfg=()=>{const base=siteBase();return {...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,apiList:chkBrowse(CFG.apiList,base).ok,rvm:CFG.rvo=='off'||!['wp','json','page'].includes(CFG.rvm)?'':CFG.rvm,rvu:sf(CFG.rvu,120),rvc:tok(CFG.rvc)?CFG.rvc:''}};
+const cfg=()=>{const base=siteBase();return {...CFG,name:CFG.name||'MaSource',lang:CFG.lang||'multi',ver:CFG.ver||'0.1.0',base,filters:cleanFilters(CFG.filters),browse:chkBrowse(CFG.browse,base).ok,apiList:chkBrowse(CFG.apiList,base).ok,rvm:CFG.rvo=='off'||!['wp','json','page','wpd'].includes(CFG.rvm)?'':CFG.rvm,rvu:sf(CFG.rvu,120),rvc:tok(CFG.rvc)?CFG.rvc:''}};
 function applyCfg(o){
  if(!o||typeof o!='object')return;
  if(o.type=='novel'||o.type=='manga')CFG.type=o.type;
@@ -1351,6 +1351,11 @@ function ext:parseChapter(path)
         end
         if #ps >= 3 and n > 300 then body = table.concat(ps) end
     end
+    if body then -- titre doublé en tête (Chapter 5: Chapter 5 Titre) : on retire le premier, sur les 700 premiers caractères seulement
+        local head, tail = body:sub(1, 700), body:sub(701)
+        head = head:gsub("[Cc]hapter%s+(%d+[%.%-]?%d*)%s*:%s*(<?[^<]-[Cc]hapter%s+%1)", "%2", 1)
+        body = head .. tail
+    end
     if not body or #body < 50 then return "<p>Texte du chapitre introuvable (classe « " .. CONT .. " »).</p>" end
     return body
 end
@@ -1593,6 +1598,8 @@ async function detectReviews(org,html,url,alt){
  const d=dom(html);let path='';try{path=new URL(url).pathname.replace(/\/+$/,'')}catch{}
  const slug=path.split('/').filter(Boolean).pop()||'',T=async u=>{try{const p=await getPage(u);return p&&!blocked(p)&&p.status<400?p.text:null}catch{return null}};
  const disq=/disqus_thread|disqus\.com\/embed|fb-comments/i.test(html);
+ // 0) wpDiscuz : commentaires chargés en AJAX (POST admin-ajax.php), absents du HTML de la fiche ; le proxy du Hub ne fait que des GET : non testable ici
+ if(/wpdiscuz|wpd-thread-wrapper|id=.wpdcom/i.test(html)&&/"wc_post_id":"\d+"|\bpostid-\d+/.test(html))return{m:'wpd',u:'ajax',n:0};
  // 1) commentaires WordPress (API REST)
  const id=wpId(html);
  if(id){const u='/wp-json/wp/v2/comments?post={id}&per_page=50',t=await T(org+u.replace('{id}',id)),n=t?rvItems({rvm:'wp'},t).length:0;if(n)return{m:'wp',u,n}}
@@ -1617,6 +1624,7 @@ async function detectReviews(org,html,url,alt){
  return{m:'',disq}}
 async function loadReviews(c,path){
  const p=path.replace(/\/+$/,''),slug=p.split('/').pop();let u;
+ if(c.rvm=='wpd')throw new Error('wpDiscuz charge ses commentaires par POST : non testable depuis le navigateur, à vérifier sur la liseuse');
  if(c.rvm=='page')u=c.rvu.replace('{path}',p);
  else if(c.rvm=='json'){u=c.rvu;if(u.includes('{id}')){const f=await getPage(new URL(p,c.base+'/').href),nid=rvIdOf(f.text,c.rvi);if(!nid)return [];u=u.replace('{id}',encodeURIComponent(nid))}u=u.replace('{slug}',slug)}
  else{const f=await getPage(new URL(p,c.base+'/').href),id=wpId(f.text);if(!id)return [];u=c.rvu.replace('{id}',id)}
@@ -1626,7 +1634,130 @@ async function loadReviews(c,path){
   for(let n=2;more&&n<=6&&all.length<150;n++){const t=await get1(n),it=rvItems(c,t);if(!it.length)break;all.push(...it);try{more=JSON.parse(t).hasMore===true}catch{more=false}}}
  return all.slice(0,150)}
 // bloc Lua ajouté au .lua quand des avis sont détectés (aucun antislash)
-function reviewsLua(c){return `
+// bloc Lua des avis wpDiscuz (commentaires chargés en AJAX) : aucun antislash, aucun accent grave
+function wpdLua(c){return `
+-- ===== Avis : commentaires wpDiscuz de la fiche (chargés en AJAX par le site) =====
+local MONTHS = { january = 1, february = 2, march = 3, april = 4, may = 5, june = 6, july = 7, august = 8,
+    september = 9, october = 10, november = 11, december = 12 }
+local function rv_date(t)
+    if not t then return nil end
+    local mo, d, y = t:match("^%s*(%a+)%s+(%d+),?%s+(%d%d%d%d)")
+    local m = mo and MONTHS[mo:lower()]
+    if m then return string.format("%04d-%02d-%02d", tonumber(y), m, tonumber(d)) end
+    return t:match("^(%d%d%d%d%-%d%d%-%d%d)")
+end
+local function rv_json(s)
+    local ok, J = pcall(require, "rapidjson")
+    if not ok then ok, J = pcall(require, "json") end
+    if not ok then return nil end
+    local ok2, v = pcall(J.decode, s)
+    if ok2 and type(v) == "table" then return v end
+    return nil
+end
+local function rv_post(url, body)
+    local hdr = { ["User-Agent"] = UA, ["Referer"] = BASE .. "/", ["X-Requested-With"] = "XMLHttpRequest",
+        ["Content-Type"] = "application/x-www-form-urlencoded" }
+    local okn, net = pcall(require, "core.net")
+    if okn and type(net) == "table" and net.post then
+        local ok, res = pcall(net.post, url, body, { headers = hdr, timeout = 20 })
+        if ok and type(res) == "string" and #res > 20 then return res end
+    end
+    local ok, res = pcall(function()
+        local req = url:match("^https") and require("ssl.https") or require("socket.http")
+        local ltn12 = require("ltn12")
+        local chunks = {}
+        hdr["Content-Length"] = tostring(#body)
+        local _, code = req.request { url = url, method = "POST", sink = ltn12.sink.table(chunks),
+            source = ltn12.source.string(body), headers = hdr, timeout = 20 }
+        if code == 200 then return table.concat(chunks) end
+    end)
+    if ok and type(res) == "string" and #res > 20 then return res end
+    return nil
+end
+local function rv_in(blk, cls)
+    local pos = 1
+    while true do
+        local s2, e2, tn, attrs = blk:find("<(%a%w*)(%s[^>]*)>", pos)
+        if not s2 then return nil end
+        local cl = attr(attrs, "class")
+        if cl and (" " .. cl .. " "):find(" " .. cls .. " ", 1, true) then
+            return inner(blk, e2 + 1, tn), attrs
+        end
+        pos = e2 + 1
+    end
+end
+local function rv_parse(html)
+    local out, pos = {}, 1
+    while true do
+        local s2, e2, tn, attrs = html:find("<(%a%w*)(%s[^>]*)>", pos)
+        if not s2 then break end
+        local id = attr(attrs, "id")
+        local cl = attr(attrs, "class")
+        if id and id:match("^wpd%-comm%-%d+_%d+$") and cl and (" " .. cl .. " "):find(" wpd-comment ", 1, true) then
+            local blk = inner(html, e2 + 1, tn) or ""
+            pos = e2 + #blk + 1
+            if not (" " .. cl .. " "):find(" wpd-reply ", 1, true) then
+                local top = blk:gsub('<div[^>]-id="wpd%-comm%-.*$', "")
+                local who = rv_in(top, "wpd-comment-author")
+                local what = rv_in(top, "wpd-comment-text")
+                local _, dattrs = rv_in(top, "wpd-comment-date")
+                local votes = rv_in(top, "wpd-vote-result")
+                local av = top:match('class="wpd%-avatar.-<img[^>]-src="([^"]+)"')
+                what = what and para(what) or ""
+                if #what > 1 then
+                    out[#out + 1] = { id = id:match("(%d+)_"), author = (who and txt(who) ~= "") and txt(who) or "Anonyme",
+                        content = what, avatar = av and abs(dec(av)) or nil,
+                        date = rv_date(dattrs and attr(dattrs, "title")), likes = tonumber(votes and txt(votes)) or 0, dislikes = 0 }
+                end
+            end
+        else
+            pos = e2 + 1
+        end
+    end
+    return out
+end
+local RV_CUR = {}
+local function rv_fetch(path, page, sort)
+    local fiche = get(path)
+    if not fiche then return nil end
+    local id = fiche:match('"wc_post_id":"(%d+)"') or fiche:match("postid%-(%d+)") or fiche:match("[?&]p=(%d+)")
+    if not id then return {}, false end
+    local wsort = sort == "mostliked" and "by_vote" or (sort == "oldest" and "oldest" or "newest")
+    local key = path .. "|" .. wsort
+    local cur = (page > 1 and RV_CUR[key .. "|" .. page]) or { last = "0", offset = 0 }
+    if page > 1 and not RV_CUR[key .. "|" .. page] then return {}, false end
+    local body = "action=wpdLoadMoreComments&sorting=" .. wsort .. "&offset=" .. tostring(cur.offset)
+        .. "&lastParentId=" .. tostring(cur.last) .. "&isFirstLoad=" .. (page == 1 and "1" or "0")
+        .. "&wpdType=&postId=" .. id
+    local raw = rv_post(BASE .. "/wp-admin/admin-ajax.php", body)
+    if not raw then return nil end
+    local data = rv_json(raw)
+    local d = data and (data.data or data) or nil
+    local html = type(d) == "table" and (d.comment_list or d.message or d.comments) or raw
+    if type(html) ~= "string" then return nil end
+    local items = rv_parse(html)
+    local more = type(d) == "table" and (tostring(d.is_show_load_more) == "1" or d.is_show_load_more == true) or false
+    if more and #items > 0 then
+        local last = type(d) == "table" and (d.last_parent_id or d.loadLastCommentId) or nil
+        RV_CUR[key .. "|" .. (page + 1)] = { last = tostring(last or items[#items].id or "0"), offset = cur.offset + #items }
+    else
+        more = false
+    end
+    return items, more
+end
+
+function ext:parseReviews(path, page, sort)
+    local pg = tonumber(page) or 1
+    local p = path:gsub("^https?://[^/]+", ""):gsub("/+$", "")
+    local ok, items, more = pcall(rv_fetch, p, pg, sort)
+    if not ok or items == nil then
+        logger.warn("avis wpDiscuz indisponibles", tostring(items))
+        return { reviews = {}, has_more = false, error = true }
+    end
+    return { reviews = items, has_more = more and true or false }
+end
+`}
+function reviewsLua(c){if(c.rvm=='wpd')return wpdLua(c);return `
 -- ===== Avis (commentaires des lecteurs), détectés par le Hub : mode ${c.rvm} =====
 local RV_MODE = "${c.rvm}"
 local RV_URL  = "${ls(c.rvu)}"
@@ -1846,6 +1977,7 @@ async function runTests(c){
   /(\.\.\.|…)\s*$/.test(og)&&add('w','Fiche : description tronquée dans og:description (le .lua cherche la version complète)');
   /&#x?[0-9a-f]+;/i.test(f.text)&&add('ok','Fiche : entités HTML numériques (&#x27;…) présentes, décodées par le .lua généré');
   if(c.rvo!='off'){const rv=await detectReviews(base,f.text,abs(first),Array.from(h||[]).slice(0,5).map(a=>{try{return abs(a.getAttribute('href'))}catch{return ''}}).filter(u=>u&&u!=abs(first)));CFG.rvm=rv.m;CFG.rvu=rv.u||'';CFG.rvc=rv.c||'';CFG.rvi=rv.i||'';
+   rv.m=='wpd'?add('w','Avis : commentaires wpDiscuz repérés (chargés en AJAX par le site), non testables depuis le navigateur : l\'onglet Avis sera actif, à vérifier sur la liseuse'):
    rv.m=='wp'?add('ok','Avis : '+rv.n+' commentaire(s) lus par l\'API WordPress : l\'onglet Avis sera actif'):
    rv.m=='json'?add('ok','Avis : '+rv.n+' avis lus par l\'API '+rv.u+' : l\'onglet Avis sera actif'):
    rv.m=='page'?add('ok','Avis : '+rv.n+' avis repérés ('+(rv.u=='{path}'?'dans la fiche':rv.u)+', classe « '+rv.c+' ») : l\'onglet Avis sera actif'):
@@ -1962,7 +2094,7 @@ function renderResult(tests,info,openAdv){LASTT=tests;
   ${inp('a_search','Adresse d\'une recherche HTML (avec {q} et {page})',c.search,'https://exemple.com/search?q={q}')}
   <div class="row"><div>${inp('a_list','Liens d\'œuvre contiennent',c.list,'/novel/')}</div><div>${inp('a_chap','Liens de chapitre contiennent',c.chap,'/chapter/')}</div></div>
   <div class="row"><div>${inp('a_cont','Classe CSS du texte (roman)',c.cont,'chapter-content')}</div><div>${inp('a_img','Classe CSS des images (manga)',c.img,'page-img')}</div><div><label>Ordre des chapitres</label><select id="a_rev"><option value="0" ${c.rev?'':'selected'}>Tel quel</option><option value="1" ${c.rev?'selected':''}>Inverser</option></select></div></div>
-  <div class="row"><div><label>Avis (commentaires des lecteurs)</label><select id="a_rvo"><option value="auto" ${c.rvo=='off'?'':'selected'}>Détecter automatiquement</option><option value="off" ${c.rvo=='off'?'selected':''}>Pas d'onglet Avis</option></select><span class="hint">${c.rvm?'Détecté : '+({wp:'commentaires WordPress',json:'API JSON',page:'page HTML'}[c.rvm]||c.rvm)+' — '+H(c.rvu):'Aucun avis détecté pour l\'instant.'}</span></div></div>
+  <div class="row"><div><label>Avis (commentaires des lecteurs)</label><select id="a_rvo"><option value="auto" ${c.rvo=='off'?'':'selected'}>Détecter automatiquement</option><option value="off" ${c.rvo=='off'?'selected':''}>Pas d'onglet Avis</option></select><span class="hint">${c.rvm?'Détecté : '+({wp:'commentaires WordPress',json:'API JSON',page:'page HTML',wpd:'commentaires wpDiscuz (AJAX)'}[c.rvm]||c.rvm)+' — '+H(c.rvu):'Aucun avis détecté pour l\'instant.'}</span></div></div>
   <div class="row"><div>${inp('a_apil','Adresse API de la liste (sites Next.js, facultatif)',c.apiList,'https://site.fr/api/novels?genres={genre}&page={page}')}<span class="hint">À remplir si la liste filtrée est vide dans l'aperçu : le site la charge par une API JSON (DevTools › Network). Même écriture que l'adresse de liste.</span></div></div>
   <div class="row"><div><label>Moteur</label><select id="a_eng"><option value="">Aucun (génération générique)</option>${Object.entries(ENGINES).map(([k,x])=>`<option value="${k}" ${c.engine==k?'selected':''}>${H(x.label)}</option>`).join('')}</select><span class="hint">Changer de moteur réapplique ses réglages (adresses, classes) : vérifie-les ensuite.</span></div></div>
   <p style="margin:12px 0 2px"><b>Filtres</b> <small>(genre, statut, tri… comme sur le site)</small></p>
