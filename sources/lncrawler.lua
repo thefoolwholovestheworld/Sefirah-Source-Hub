@@ -8,31 +8,26 @@
 --
 -- Chemins stockés (sans domaine) :
 --   roman    : « <slug>/<source> »                 (ex. shadow-slave/novelfire-net)
---   chapitre : « <slug>/<source>/chapter/<n> »
+--   chapitre : « <slug>/<source>/chapter/<chapter_id> »   (chapter_id réel : peut commencer à 0,
+--              avoir des trous)
 --
--- VÉRIFIÉ sur de vraies réponses JSON fournies :
---   · recherche  GET /novels/search/?query=…&page=N&page_size=24&sort_by=title&sort_order=asc
---       → { count, total_pages, current_page, results = [ { title, slug, languages,
---           prefered_source = { source_slug, cover_min_url, authors, tags,
---           chapters_count, available_chapters_count, … } } ] }
---   · chapitre   GET /novels/<slug>/<source>/chapter/<n>/
---       → { chapter_id, title, body (HTML, commence par <h1>), prev_chapter, next_chapter }
---   · fiche      GET /novels/<slug>/<source>/   (réponse réelle fournie le 25/10/2026)
---       → champs de LA SOURCE au premier niveau (title, synopsis, status, authors, tags,
---           cover_url, language, chapters_count, available_chapters_count, …) ET
---           novel = { title, slug, sources = [ { source_slug, source_name, language,
---           chapters_count, available_chapters_count, last_chapter_update, … } ], … }
---           → `novel.sources` sert au choix de la source (ext:listSources).
---   · filtres    GET /novels/search/?query=…&tag=…&author=…&language=…&min_rating=3.5
---       &sort_by=title|date_added&sort_order=asc|desc  (URL du site + réponse réelle, 25/10/2026)
---   · avis     GET /novels/<slug>/comments/  (réponse réelle fournie le 25/10/2026, voir parseReviews)
--- NON VÉRIFIÉ (aucune réponse fournie) :
---   · plusieurs valeurs pour tag / language / exclusion (répété ou séparé par des virgules ?),
---     le nom du paramètre d'exclusion et du contenu adulte, et les valeurs de sort_by autres que
---     title / date_added : voir la table PARAM et MULTI_MODE ci-dessous (un seul endroit à changer) ;
---   · les titres de la liste : /novels/<slug>/<source>/chapterlist/ — essayée, sinon les
---     chapitres sont numérotés 1…N (« Chapter N »), comme les chapitres de l'API (« chapter/N »).
---   · le tri « popularité » (sort_by=weekly_views) : repli sur le tri par titre si vide.
+-- Endpoints (relus dans le code de l'API) :
+--   · recherche  GET /novels/search/?query=…&page=N&page_size=24&sort_by=…&sort_order=…
+--       → { count, total_pages, current_page, results = [ { slug, languages,
+--           suggested_source = { title, source_slug, cover_min_url, authors, tags,
+--           chapters_count, available_chapters_count, … } | null } ] }
+--       (ancien nom du champ : prefered_source — les deux sont acceptés)
+--       Paramètres : query, tag (répété), exclude_tag (répété), author (répété),
+--       languages (virgules ou répété), min_rating (≥ 1), adult=hide|show|only,
+--       sort_by = popularity | rating | title | date_added | trending | last_updated.
+--   · fiche      GET /novels/<slug>/<source>/   (champs de la source + novel.sources[])
+--   · chapitres  GET /novels/<slug>/<source>/chapters/?page=N&page_size=500
+--       → { count, total_pages, current_page, chapters = [ { chapter_id, title, display_title,
+--           has_content, … } ] }   (triés par chapter_id)
+--   · chapitre   GET /novels/<slug>/<source>/chapter/<chapter_id>/
+--       → { chapter_id, title, body (HTML), prev_chapter, next_chapter }
+--       404 si le chapitre n'existe pas ou n'a pas de contenu.
+--   · avis       GET /novels/<slug>/comments/  → tableau de commentaires avec replies imbriquées.
 -- Si l'API répond par un refus, la réponse est enregistrée dans sefirah/lncrawler_last_error.txt.
 
 local logger = require("logger")
@@ -120,11 +115,18 @@ local function join(list)
     return t
 end
 
+-- Source suggérée d'un résultat de recherche (nom actuel : suggested_source ; ancien : prefered_source).
+local function pref_source(r)
+    if type(r.suggested_source) == "table" then return r.suggested_source end
+    if type(r.prefered_source) == "table" then return r.prefered_source end
+    return nil
+end
+
 local function novel_of(r)
-    local src = type(r.prefered_source) == "table" and r.prefered_source or nil
+    local src = pref_source(r)
     local slug = str(r.slug)
     local source = src and str(src.source_slug)
-    local title = str(r.title) or (src and str(src.title))
+    local title = (src and str(src.title)) or str(r.title)
     if not slug or not source or not title then return nil end
     return { name = title, path = slug .. "/" .. source, cover = cover_of(src) }
 end
@@ -132,8 +134,6 @@ end
 local function search(params, page)
     local url = API .. "/novels/search/?" .. params .. "&page=" .. tostring(page or 1)
         .. "&page_size=24"
-    -- Dernière requête de recherche : permet de la comparer à l'URL du site si un filtre ne réagit pas.
-    dump_error(url, "", "lncrawler_last_url.txt")
     local data = get_json(url)
     local novels = {}
     if data and type(data.results) == "table" then
@@ -149,48 +149,56 @@ end
 
 local cache = {}
 
--- Retrouve les infos d'un roman via la recherche (titre ≈ slug) : fiable, car vérifiée.
-local function find_in_search(slug, source)
+-- Retrouve les infos d'un roman via la recherche (titre ≈ slug), si la fiche est indisponible.
+local function find_in_search(slug)
     local q = slug:gsub("%-", " ")
     local _, data = search("query=" .. url_encode(q) .. "&sort_by=title&sort_order=asc", 1)
     if data and type(data.results) == "table" then
         for _, r in ipairs(data.results) do
             if type(r) == "table" and r.slug == slug then
-                -- on préfère la source demandée si le roman en propose plusieurs
-                local src = r.prefered_source
-                if type(src) == "table" and (src.source_slug == source or not source) then
-                    return r, src
-                end
-                return r, src
+                return r, pref_source(r)
             end
         end
     end
     return nil
 end
 
--- Liste des chapitres avec titres : tentative tolérante sur /chapterlist/ (non vérifiée).
-local function try_titles(slug, source, total)
-    local titles, count = {}, 0
-    local base = API .. "/novels/" .. slug .. "/" .. source .. "/chapterlist/"
-    for page = 1, 60 do
-        local data = get_json(base .. "?page=" .. page, true)
-        if not data then break end
-        local arr = data.results or data.chapters or data.items or (data[1] and data) or nil
-        if type(arr) ~= "table" or #arr == 0 then break end
-        local got = 0
-        for _, c in ipairs(arr) do
-            if type(c) == "table" then
-                local n = tonumber(c.chapter_id or c.chapter or c.number or c.id)
-                local t = str(c.title)
-                if n and t and t ~= "" then if not titles[n] then count = count + 1 end; titles[n] = t; got = got + 1 end
+-- Liste des chapitres : /chapters/ (page_size max 500). Les chapitres sans contenu (404 à la
+-- lecture) sont ignorés. chapter_id est le vrai numéro (peut commencer à 0, avoir des trous).
+-- Renvoie nil si la première page échoue (→ repli 1…N), sinon la liste (éventuellement vide).
+local function fetch_chapters(slug, source)
+    local out, seen = {}, {}
+    local base = API .. "/novels/" .. slug .. "/" .. source .. "/chapters/?page_size=500&page="
+    for page = 1, 400 do
+        local data = get_json(base .. page, page > 1)
+        if not data or type(data.chapters) ~= "table" then
+            if page == 1 then return nil end
+            break
+        end
+        if #data.chapters == 0 then break end
+        -- Le serveur renvoie la dernière page si on dépasse la fin : on s'arrête.
+        local cp = tonumber(data.current_page)
+        if cp and cp ~= page then break end
+        for _, c in ipairs(data.chapters) do
+            if type(c) == "table" and c.has_content ~= false then
+                local id = tonumber(c.chapter_id)
+                if id and not seen[id] then
+                    seen[id] = true
+                    local name = str(c.display_title)
+                    if not name or name == "" then name = str(c.title) end
+                    if not name or name == "" then name = "Chapter " .. id end
+                    out[#out + 1] = {
+                        name = name,
+                        path = slug .. "/" .. source .. "/chapter/" .. string.format("%d", id),
+                        chapter_number = id,
+                    }
+                end
             end
         end
-        if got == 0 then break end
         local pages = tonumber(data.total_pages)
         if not pages or page >= pages then break end
-        if total and total > 0 and count >= total then break end
     end
-    return titles
+    return out
 end
 
 -- Sources d'un roman (réponse vérifiée : det.novel.sources). Mises en cache à part (30 min) :
@@ -281,7 +289,7 @@ local function load_novel(path)
 
     local title, total, author, genres, cover, summary, status = nil, 0, nil, nil, nil, nil, nil
 
-    -- Fiche détaillée : réponse vérifiée, champs de la source au premier niveau.
+    -- Fiche détaillée : champs de la source au premier niveau.
     local det = fetch_detail(slug, source, true)
     if det then
         title   = str(det.title) or str(det.novel_title)
@@ -293,12 +301,12 @@ local function load_novel(path)
         cover   = str(det.cover_url)
     else
         -- Repli : données de la recherche (auteur, genres, couverture, nombre de chapitres).
-        local r, src = find_in_search(slug, source)
+        local r, src = find_in_search(slug)
         if not r then
             dump_error("roman introuvable : " .. tostring(path), "")
             return nil
         end
-        title = str(r.title)
+        title = (src and str(src.title)) or str(r.title)
         if src then
             total  = tonumber(src.available_chapters_count) or tonumber(src.chapters_count) or 0
             author = table.concat(join(src.authors), ", ")
@@ -308,12 +316,14 @@ local function load_novel(path)
     end
     title = title or (slug:gsub("%-", " "))
 
-    local titles = total > 0 and try_titles(slug, source, total) or {}
-    local chapters = {}
-    for n = 1, total do
-        local name = "Chapter " .. n
-        if titles[n] then name = titles[n] end
-        chapters[n] = { name = name, path = slug .. "/" .. source .. "/chapter/" .. n, chapter_number = n }
+    -- Vraie liste (chapter_id réels). Repli 1…N seulement si /chapters/ ne répond pas.
+    local chapters = fetch_chapters(slug, source)
+    if chapters == nil then
+        chapters = {}
+        for n = 1, total do
+            chapters[n] = { name = "Chapter " .. n, path = slug .. "/" .. source .. "/chapter/" .. n,
+                chapter_number = n }
+        end
     end
 
     local data = {
@@ -327,17 +337,13 @@ end
 
 
 -- ── Filtres (ceux du site : écran « Rechercher des romans ») ─────────────────────────────────
--- Paramètres d'URL. VÉRIFIÉS : query, tag (une valeur), author, language, min_rating, sort_by
--- (title, date_added), sort_order. SUPPOSÉS (le site ne les montre pas dans les URL fournies) :
--- exclude, adult et les sort_by « rating », « total_views », « weekly_views », « last_updated ».
--- Si le site utilise d'autres noms, il suffit de les changer ici.
+-- Noms de paramètres de l'API. `tag`, `exclude_tag` et `author` : valeurs répétées (tag=A&tag=B).
+-- `languages` : valeurs séparées par des virgules. `min_rating` : valeur ≥ 1.
 local PARAM = {
     query = "query", tag = "tag", exclude = "exclude_tag", author = "author",
-    language = "language", min_rating = "min_rating",
+    language = "languages", min_rating = "min_rating",
     sort_by = "sort_by", sort_order = "sort_order", adult = "adult",
 }
--- Plusieurs valeurs d'un même filtre : "repeat" → tag=A&tag=B ; "comma" → tag=A,B.
-local MULTI_MODE = "repeat"
 
 -- Tags proposés (noms exacts du site, les plus fréquents ; les autres : « Autres tags »).
 local TAGS = {
@@ -354,9 +360,10 @@ local LANGS = {
     { "th", "Thaï" }, { "vi", "Vietnamien" }, { "id", "Indonésien" }, { "tr", "Turc" },
     { "pl", "Polonais" }, { "nl", "Néerlandais" }, { "sv", "Suédois" }, { "da", "Danois" },
 }
+-- Valeurs de sort_by acceptées par l'API : popularity, rating, title, date_added, trending, last_updated.
 local SORTS = {
     { "title", "Titre" }, { "rating", "Note" }, { "date_added", "Date d'ajout" },
-    { "total_views", "Vues totales" }, { "weekly_views", "Tendance (vues hebdomadaires)" },
+    { "popularity", "Popularité" }, { "trending", "Tendance" },
     { "last_updated", "Dernière mise à jour" },
 }
 
@@ -373,7 +380,7 @@ local function make_filters(sort, order)
     local sorts = {}
     for _, x in ipairs(SORTS) do sorts[#sorts + 1] = { id = x[1], label = x[2] } end
     local ratings = { { id = "", label = "Toutes les notes" } }
-    for _, r in ipairs({ "0", "0.5", "1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5" }) do
+    for _, r in ipairs({ "1", "1.5", "2", "2.5", "3", "3.5", "4", "4.5", "5" }) do
         ratings[#ratings + 1] = { id = r, label = "★ " .. r .. "+" }
     end
     return {
@@ -396,6 +403,7 @@ end
 
 local function split_csv(v, sep)
     local out = {}
+    if type(v) == "table" then v = table.concat(v, sep or ",") end
     for raw in tostring(v or ""):gmatch("[^" .. (sep or ",") .. "]+") do
         local item = raw:gsub("^%s+", ""):gsub("%s+$", "")
         if item ~= "" then out[#out + 1] = item end
@@ -403,14 +411,18 @@ local function split_csv(v, sep)
     return out
 end
 
-local function add_multi(parts, name, values)
-    if #values == 0 then return end
-    if MULTI_MODE == "comma" then
-        parts[#parts + 1] = name .. "=" .. url_encode(table.concat(values, ","))
-    else
-        for _, v in ipairs(values) do parts[#parts + 1] = name .. "=" .. url_encode(v) end
-    end
+-- Valeurs répétées : name=A&name=B
+local function add_repeat(parts, name, values)
+    for _, v in ipairs(values) do parts[#parts + 1] = name .. "=" .. url_encode(v) end
 end
+
+-- Valeurs séparées par des virgules : name=A,B
+local function add_comma(parts, name, values)
+    if #values > 0 then parts[#parts + 1] = name .. "=" .. url_encode(table.concat(values, ",")) end
+end
+
+-- Anciens noms de tri (versions précédentes du plugin) → noms actuels de l'API.
+local SORT_ALIAS = { weekly_views = "trending", total_views = "popularity" }
 
 -- Construit la chaîne de paramètres à partir de la sélection du panneau de filtres.
 -- `title_sort` : repli quand le tri choisi est refusé par le site (tri par titre).
@@ -420,18 +432,20 @@ local function build_params(term, f, title_sort)
     if term and term ~= "" then parts[#parts + 1] = PARAM.query .. "=" .. url_encode(term) end
     local tags = split_csv(f.tags)
     for _, t in ipairs(split_csv(f.tags_o)) do tags[#tags + 1] = t end
-    add_multi(parts, PARAM.tag, tags)
-    add_multi(parts, PARAM.exclude, split_csv(f.tags_x))
-    add_multi(parts, PARAM.author, split_csv(f.author, ";"))
-    add_multi(parts, PARAM.language, split_csv(f.langs))
+    add_repeat(parts, PARAM.tag, tags)
+    add_repeat(parts, PARAM.exclude, split_csv(f.tags_x))
+    add_repeat(parts, PARAM.author, split_csv(f.author, ";"))
+    add_comma(parts, PARAM.language, split_csv(f.langs))
     if f.rating and f.rating ~= "" then parts[#parts + 1] = PARAM.min_rating .. "=" .. url_encode(f.rating) end
     if f.adult and f.adult ~= "" and f.adult ~= "hide" then
         parts[#parts + 1] = PARAM.adult .. "=" .. url_encode(f.adult)
     end
-    local sort  = title_sort and "title" or (f.sort ~= "" and f.sort) or "title"
-    local order = title_sort and "asc" or (f.order ~= "" and f.order) or "asc"
-    parts[#parts + 1] = PARAM.sort_by .. "=" .. sort
-    parts[#parts + 1] = PARAM.sort_order .. "=" .. order
+    local sort = (f.sort and f.sort ~= "") and f.sort or "title"
+    sort = SORT_ALIAS[sort] or sort
+    local order = (f.order and f.order ~= "") and f.order or "asc"
+    if title_sort then sort, order = "title", "asc" end
+    parts[#parts + 1] = PARAM.sort_by .. "=" .. url_encode(sort)
+    parts[#parts + 1] = PARAM.sort_order .. "=" .. url_encode(order)
     return table.concat(parts, "&")
 end
 
@@ -441,27 +455,36 @@ local ext = {
     name    = "LNCrawler",
     site    = SITE,
     lang    = "multi",
-    version = "0.5.0",
+    version = "0.6.0",
     -- Avis = commentaires du roman (API JSON /novels/<slug>/comments/, voir parseReviews).
     maxReviews = 150,
     review_cache_rev = 2,
 }
 
-ext.popularFilters = make_filters("weekly_views", "desc")
+ext.popularFilters = make_filters("trending", "desc")
 ext.searchFilters  = make_filters("title", "asc")
 
--- Un tri refusé par le site (nom de sort_by inconnu) donne une page vide : on réessaie par titre.
+-- Repli par titre si le tri choisi donne une page vide (page 1 uniquement).
 local function filtered_search(term, page, options, default_sort)
     local f = (options and options.filters) or { sort = default_sort[1], order = default_sort[2] }
-    local novels = search(build_params(term, f), page)
-    if #novels == 0 and f.sort ~= "title" then
-        novels = search(build_params(term, f, true), page)
+    local p = page or 1
+    local function run(title_sort)
+        local novels, data = search(build_params(term, f, title_sort), p)
+        -- Le serveur renvoie la dernière page si on dépasse la fin : page vide dans ce cas.
+        local cp = data and tonumber(data.current_page)
+        if cp and cp ~= p then novels = {} end
+        return novels, data
     end
-    return { novels = novels }
+    local novels, data = run(false)
+    if #novels == 0 and p == 1 and f.sort ~= "title" then
+        novels, data = run(true)
+    end
+    local cp, tp = data and tonumber(data.current_page), data and tonumber(data.total_pages)
+    return { novels = novels, has_more = (cp ~= nil and tp ~= nil and cp < tp) }
 end
 
 function ext:popularNovels(page, options)
-    return filtered_search(nil, page, options, { "weekly_views", "desc" })
+    return filtered_search(nil, page, options, { "trending", "desc" })
 end
 
 function ext:searchNovels(term, page, options)
@@ -544,13 +567,10 @@ function ext:parseChapter(path)
 end
 
 -- ── Avis (commentaires du roman) ─────────────────────────────────────────────────────────────
--- VÉRIFIÉ sur une vraie réponse (25/10/2026) :
 --   GET /novels/<slug>/comments/  →  [ { id, author_name, message, contains_spoiler,
---       created_at (ISO), upvotes, downvotes, vote_score, replies = [ … ], has_replies,
---       edited, … } ]
--- Les commentaires sont rattachés au roman (slug), pas à une source : tous les « ‹slug›/‹source› »
--- d'un même roman montrent donc les mêmes avis. La réponse est un simple tableau, sans pagination
--- connue : tout arrive en une page et le tri est fait ici.
+--       created_at (ISO), upvotes, downvotes, vote_score, replies = [ … ], edited, … } ]
+-- Les commentaires sont rattachés au roman (slug), pas à une source, et incluent aussi ceux des
+-- chapitres de toutes les sources. Tableau simple, sans pagination : le tri est fait ici.
 local function plain(v)
     local t = tostring(v or "")
     t = t:gsub("[Bb][Rr]%s*/?>", "\n"):gsub("</[Pp]>", "\n\n"):gsub("<[^>]*>", "")
@@ -580,6 +600,7 @@ local function append_comments(list, parent_id, depth, out, seen)
             seen[c] = true
             local body = comment_body(c)
             local id = str(c.id)
+            local child_parent, child_depth = parent_id, depth
             if body then
                 out[#out + 1] = {
                     id = id, author = comment_author(c), content = body,
@@ -588,8 +609,9 @@ local function append_comments(list, parent_id, depth, out, seen)
                     dislikes = tonumber(c.downvotes) or 0,
                     parent_id = parent_id, depth = depth,
                 }
+                child_parent, child_depth = id or parent_id, depth + 1
             end
-            append_comments(c.replies, id or parent_id, depth + 1, out, seen)
+            append_comments(c.replies, child_parent, child_depth, out, seen)
         end
     end
 end
@@ -604,7 +626,7 @@ function ext:parseReviews(path, page, sort)
     if not data then
         return { reviews = {}, has_more = false, error = last_http or true }
     end
-    -- Tableau direct (réponse vérifiée) ; on tolère aussi { results = [...] }.
+    -- Tableau direct ; on tolère aussi { results = [...] }.
     local list = data
     if type(data.results) == "table" then list = data.results end
 
