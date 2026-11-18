@@ -245,7 +245,7 @@ async function relay(req, env, u, cors) {
 // === Demandes de sites (onglet « Demande » du Hub) ===
 // Stockage dans le KV RELAY : une clé « q:<site> » par site demandé (compteur de votes dans la valeur ET dans les métadonnées,
 // ce qui permet de lister toutes les demandes en une seule opération). Anti-abus : 5 envois par heure et par personne,
-// un seul vote par personne et par site (empreinte d'IP hachée, l'IP elle-même n'est jamais stockée).
+// un seul vote par personne et par site, retirable (empreinte d'IP hachée, l'IP elle-même n'est jamais stockée).
 // Un site qui affiche le contrôle anti-bot de Cloudflare est refusé : une liseuse ne peut pas le passer (et on ne le contourne pas).
 const REQ_LIST_MAX = 300, REQ_PER_HOUR = 5, REQ_VOTE_TTL = 60 * 24 * 3600;
 async function requesterId(req) {
@@ -277,6 +277,24 @@ async function requestsApi(req, env, u, cors) {
   let b;
   try { b = await req.json(); } catch { return json({ code: 'bad_json' }, 400, cors); }
   const me = await requesterId(req);
+  if (u.pathname === '/requests/unvote') {
+    const h = String(b.host || '').toLowerCase().slice(0, 100);
+    if (!HOST_OK.test(h)) return json({ code: 'invalid' }, 400, cors);
+    const voteKey = 'qv:' + h + ':' + me;
+    if (!(await env.RELAY.get(voteKey))) return json({ code: 'not_voted' }, 200, cors);
+    await env.RELAY.delete(voteKey);
+    const raw = await env.RELAY.get('q:' + h);
+    if (raw) {
+      let rec = null;
+      try { rec = JSON.parse(raw); } catch {}
+      if (rec) {
+        rec.v = (Number(rec.v) || 0) - 1;
+        if (rec.v <= 0) await env.RELAY.delete('q:' + h);
+        else await env.RELAY.put('q:' + h, JSON.stringify(rec), { metadata: rec });
+      }
+    }
+    return json({ code: 'unvoted' }, 200, cors);
+  }
   const rateKey = 'qr:' + me, used = Number(await env.RELAY.get(rateKey)) || 0;
   if (used >= REQ_PER_HOUR) return json({ code: 'rate' }, 429, cors);
   let host, target = null;
