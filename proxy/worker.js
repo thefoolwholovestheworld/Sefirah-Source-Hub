@@ -1,6 +1,6 @@
 // Sefirah Source Hub — Cloudflare Worker : proxy de sites + Workers AI + relais « recevoir une source » sur la liseuse.
 // Ne contourne ni CAPTCHA, ni challenge Cloudflare, ni authentification, ni autre contrôle d'accès.
-// Binding Workers AI nommé AI. Binding KV nommé RELAY (pour « Envoyer à la liseuse »).
+// Binding Workers AI nommé AI. Binding KV nommé RELAY (pour « Envoyer à la liseuse » et pour les demandes de sites de l'onglet « Demande »).
 // Étape 2 (navigateur JavaScript, route /render) : secrets CF_ACCOUNT_ID et CF_API_TOKEN (jeton avec la permission « Browser Rendering - Edit »).
 // Variables facultatives : ALLOWED_ORIGIN, AI_MODEL, MAX_HTML_BYTES, AI_PROVIDER_ORDER.
 // Ordre conseillé : GEMINI,GROQ,CEREBRAS,OPENROUTER,WORKERS_AI (adapté aux secrets réellement configurés).
@@ -242,6 +242,70 @@ async function relay(req, env, u, cors) {
   return json({ error: 'not_found' }, 404, cors);
 }
 
+// === Demandes de sites (onglet « Demande » du Hub) ===
+// Stockage dans le KV RELAY : une clé « q:<site> » par site demandé (compteur de votes dans la valeur ET dans les métadonnées,
+// ce qui permet de lister toutes les demandes en une seule opération). Anti-abus : 5 envois par heure et par personne,
+// un seul vote par personne et par site (empreinte d'IP hachée, l'IP elle-même n'est jamais stockée).
+// Un site qui affiche le contrôle anti-bot de Cloudflare est refusé : une liseuse ne peut pas le passer (et on ne le contourne pas).
+const REQ_LIST_MAX = 300, REQ_PER_HOUR = 5, REQ_VOTE_TTL = 60 * 24 * 3600;
+async function requesterId(req) {
+  const ip = req.headers.get('CF-Connecting-IP') || 'inconnu';
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('sefirah-demande:' + ip));
+  return [...new Uint8Array(d)].slice(0, 8).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+const HOST_OK = /^(?=.{4,100}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z0-9-]{2,}$/;
+async function cloudflareChallenge(u) {
+  try {
+    const r = await fetch(u.href, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (compatible; SefirahSourceHub/2.0; +demande)', 'Accept': 'text/html,*/*;q=0.5' }, signal: AbortSignal.timeout(8000) });
+    if ((r.headers.get('cf-mitigated') || '').toLowerCase().includes('challenge')) return true;
+    if (r.status === 403 || r.status === 503) {
+      const t = (await r.text()).slice(0, 6000);
+      if (/just a moment|cf-chl|challenge-platform|attention required/i.test(t)) return true;
+    }
+  } catch {}
+  return false;
+}
+async function requestsApi(req, env, u, cors) {
+  if (!env.RELAY) return json({ code: 'not_configured' }, 501, cors);
+  if (u.pathname === '/requests' && req.method === 'GET') {
+    const l = await env.RELAY.list({ prefix: 'q:', limit: REQ_LIST_MAX });
+    const items = l.keys.map(k => k.metadata).filter(m => m && m.h).map(m => ({ host: m.h, url: m.u, votes: m.v, at: m.t }));
+    items.sort((a, b) => b.votes - a.votes || b.at - a.at);
+    return json({ requests: items }, 200, cors);
+  }
+  if (req.method !== 'POST') return json({ code: 'method_not_allowed' }, 405, cors);
+  let b;
+  try { b = await req.json(); } catch { return json({ code: 'bad_json' }, 400, cors); }
+  const me = await requesterId(req);
+  const rateKey = 'qr:' + me, used = Number(await env.RELAY.get(rateKey)) || 0;
+  if (used >= REQ_PER_HOUR) return json({ code: 'rate' }, 429, cors);
+  let host, target = null;
+  if (u.pathname === '/requests/submit') {
+    target = validTarget(String(b.url || '').slice(0, 300));
+    if (!target) return json({ code: 'invalid' }, 400, cors);
+    host = target.hostname.toLowerCase().replace(/^www\./, '');
+  } else if (u.pathname === '/requests/vote') {
+    host = String(b.host || '').toLowerCase().slice(0, 100);
+  } else return json({ code: 'not_found' }, 404, cors);
+  if (!HOST_OK.test(host)) return json({ code: 'invalid' }, 400, cors);
+  const key = 'q:' + host, voteKey = 'qv:' + host + ':' + me;
+  if (await env.RELAY.get(voteKey)) return json({ code: 'already_voted' }, 200, cors);
+  const raw = await env.RELAY.get(key);
+  let rec, code;
+  if (raw) {
+    try { rec = JSON.parse(raw); } catch { return json({ code: 'fail' }, 500, cors); }
+    rec.v = (Number(rec.v) || 0) + 1; code = 'voted';
+  } else {
+    if (!target) return json({ code: 'not_found' }, 404, cors);
+    if (await cloudflareChallenge(target)) return json({ code: 'protected' }, 200, cors);
+    rec = { h: host, u: target.origin.slice(0, 200), v: 1, t: Date.now() }; code = 'created';
+  }
+  await env.RELAY.put(key, JSON.stringify(rec), { metadata: rec });
+  await env.RELAY.put(voteKey, '1', { expirationTtl: REQ_VOTE_TTL });
+  await env.RELAY.put(rateKey, String(used + 1), { expirationTtl: 3600 });
+  return json({ code, request: { host: rec.h, url: rec.u, votes: rec.v, at: rec.t } }, 200, cors);
+}
+
 export default {
   async fetch(req, env) {
     const origin = req.headers.get('Origin') || '';
@@ -257,6 +321,7 @@ export default {
     if (allowed !== '*' && origin && origin !== allowed) return json({ error: 'origin_not_allowed' }, 403, cors);
 
     const u = new URL(req.url);
+    if (u.pathname === '/requests' || u.pathname.startsWith('/requests/')) return requestsApi(req, env, u, cors);
     if (u.pathname.startsWith('/relay/')) return relay(req, env, u, cors);
     if (u.pathname === '/explore') {
       if (req.method !== 'GET') return json({ error: 'method_not_allowed' }, 405, cors);
