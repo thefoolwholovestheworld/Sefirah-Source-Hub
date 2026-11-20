@@ -11,7 +11,7 @@
 -- vrai : les adresses de genre essaient « slice_of_life » puis « slice-of-life ».
 local logger = require("logger")
 local T = require("core.i18n").T
-local ext = { type = "manga" }
+local ext = { id = "webtoon", name = "WEBTOON", site = "https://www.webtoons.com", lang = "multi", version = "0.4.0", type = "manga" }
 local BASE = "https://www.webtoons.com"
 local UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 local MAX_LIST_PAGES = 80   -- garde-fou : 10 épisodes par page, donc 800 épisodes max
