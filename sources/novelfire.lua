@@ -564,6 +564,20 @@ function ext:parseNovelMeta(path)
         end
         if s then total_chapters = tonumber((s:gsub(",", ""))) or 0 end
     end
+    -- Le total lu sur la fiche peut être faux ou en retard. La page « /chapters »
+    -- donne le chiffre exact (champ « Go to chapter » max="3254" et phrase « A total
+    -- of 3254 chapters »), pour UNE seule requête. Elle prime sur le total de la fiche.
+    do
+        local ch_url = novel_url:gsub("/?$", "/chapters")
+        local ch_html = http_get(ch_url)
+        if ch_html then
+            local exact = tonumber(
+                ch_html:match('<input[^>]*id="gotochapno"[^>]*max="(%d+)"')
+                or ch_html:match('<input[^>]*max="(%d+)"[^>]*id="gotochapno"')
+                or ch_html:match('[Aa]%s+total%s+of%s+(%d+)%s+chapters'))
+            if exact and exact > 0 then total_chapters = exact end
+        end
+    end
     logger.dbg("NovelFire: parseNovelMeta title=", title, "total_chapters=", total_chapters)
 
     return {
@@ -671,24 +685,23 @@ function ext:parseNovel(path)
         chapters = parse_chapter_list_html(chapters_html, novel_url)
         logger.dbg("NovelFire: parseNovel page 1 chapters=", #chapters)
 
+        -- Sens de la liste (le site la donne du plus récent au plus ancien).
+        local first_desc = #chapters > 1
+            and (chapters[1].chapter_number or 0) > (chapters[2].chapter_number or 0)
+
+        -- 2 essais par page ; au bout de 4 pages perdues on s'arrête (le site bloque
+        -- sans doute les requêtes en rafale) pour ne pas figer la liseuse des minutes.
         local failed = {}
         for pg = 2, total_pages do
+            if #failed >= 4 then break end
             logger.dbg("NovelFire: parseNovel fetching chapter page", pg)
-            local more = fetch_chapter_page(chapters_url .. "?page=" .. pg, novel_url, 3)
+            local more = fetch_chapter_page(chapters_url .. "?page=" .. pg, novel_url, 2)
             if more then
                 logger.dbg("NovelFire: parseNovel page", pg, "chapters=", #more)
                 for _, ch in ipairs(more) do table.insert(chapters, ch) end
             else
                 failed[#failed + 1] = pg
             end
-        end
-
-        -- Une page manquante = liste incomplète : on refuse de renvoyer une liste
-        -- raccourcie (elle écraserait la bonne liste en cache). L'utilisateur peut
-        -- simplement actualiser de nouveau.
-        if #failed > 0 then
-            logger.err("NovelFire: parseNovel liste incomplète, pages manquantes :", table.concat(failed, ","))
-            return nil
         end
 
         -- Un chapitre publié pendant le chargement décale les pages : un même
@@ -701,6 +714,46 @@ function ext:parseNovel(path)
             end
         end
         chapters = unique
+
+        -- Pages perdues : sur ce site l'adresse d'un chapitre est toujours
+        -- /book/<roman>/chapter-<numéro>. On complète donc les numéros manquants
+        -- (titre « Chapter N » en attendant), pour que la liste soit complète et
+        -- que le nombre de chapitres soit exact. Seulement si les chapitres reçus
+        -- confirment que numéro affiché = numéro dans l'adresse.
+        if #failed > 0 or (max_ch > 0 and #chapters < max_ch) then
+            local ok_n = 0
+            for _, ch in ipairs(chapters) do
+                local n = tostring(ch.path):match("/chapter%-(%d+)$")
+                if n and tonumber(n) == ch.chapter_number then ok_n = ok_n + 1 end
+            end
+            if max_ch > 0 and #chapters > 0 and ok_n / #chapters >= 0.95 then
+                local have = {}
+                for _, ch in ipairs(chapters) do if ch.chapter_number then have[ch.chapter_number] = true end end
+                local rel = path:match("^https?://[^/]+(/.+)$") or path
+                rel = rel:gsub("/$", "")
+                local added = 0
+                for n = 1, max_ch do
+                    if not have[n] then
+                        chapters[#chapters + 1] = {
+                            name = "Chapter " .. n,
+                            path = rel .. "/chapter-" .. n,
+                            chapter_number = n,
+                        }
+                        added = added + 1
+                    end
+                end
+                table.sort(chapters, function(a, b)
+                    local x, y = a.chapter_number or 0, b.chapter_number or 0
+                    if first_desc then return x > y end
+                    return x < y
+                end)
+                logger.warn("NovelFire: pages manquantes", table.concat(failed, ","),
+                    "- chapitres complétés par numéro :", added)
+            else
+                logger.err("NovelFire: parseNovel liste incomplète, pages manquantes :", table.concat(failed, ","))
+                return nil
+            end
+        end
         logger.dbg("NovelFire: parseNovel total chapters=", #chapters, "(attendu", max_ch, ")")
     end
 
