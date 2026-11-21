@@ -1,5 +1,5 @@
 -- Beast Novels — v0.2.1 (catalogue lu depuis /novels : vraies couvertures, vrais filtres Tri/Statut/Genres, recherche)
--- v0.2.1 : les chapitres Premium (payants) sont détectés et marqués « verrouillés » au lieu d'être listés
+-- v0.2.1 : les chapitres Premium (payants) sont détectés et retirés de la liste au lieu d'être listés
 --          comme lisibles puis de planter en « Texte du chapitre introuvable ». Aucun contournement du paywall.
 local logger = require("logger")
 local BASE   = "https://beastnovels.com"
@@ -452,11 +452,10 @@ function ext:parseNovel(path)
     table.sort(ch, function(a, b) return (a.chapter_number or 0) < (b.chapter_number or 0) end)
     for i, c in ipairs(ch) do c.chapter_number = i end
     -- Le site liste aussi les chapitres Premium (onglet « Premium Chapters ») dont le texte
-    -- n'est pas accessible gratuitement : on les marque « verrouillés » (grisés, non ouverts,
-    -- ignorés par les téléchargements/exports). Si la détection est impossible (réseau...),
-    -- on ne verrouille rien : comportement identique à avant.
+    -- n'est pas accessible gratuitement : on les retire de la liste. Si la détection est
+    -- impossible (réseau...), on ne retire rien : comportement identique à avant.
     local limit = free_limit(ch, slug_of(path))
-    if limit then for i = limit + 1, #ch do ch[i].locked = true end end
+    if limit then for i = #ch, limit + 1, -1 do ch[i] = nil end end
     m.chapters, m.totalPages = ch, 1
     return m
 end
