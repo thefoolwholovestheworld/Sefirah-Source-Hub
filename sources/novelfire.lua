@@ -267,6 +267,23 @@ local function http_get_json(url)
     return data
 end
 
+-- Récupère UNE page de la liste des chapitres, avec plusieurs essais. Un essai
+-- est considéré raté si la requête échoue OU si la page ne contient aucun chapitre
+-- (écran « Loading… », page d'erreur Cloudflare…). Avant, une page ratée était
+-- ignorée en silence : la liste perdait 100 chapitres d'un coup, et le nombre de
+-- chapitres changeait à chaque actualisation.
+local function fetch_chapter_page(url, novel_url, tries)
+    for attempt = 1, tries or 3 do
+        local html = http_get(url)
+        if html then
+            local list = parse_chapter_list_html(html, novel_url)
+            if #list > 0 then return list, html end
+        end
+        logger.warn("NovelFire: page de chapitres vide ou échouée (essai", attempt, ") :", url)
+    end
+    return nil
+end
+
 -- ── Filtres « Parcourir » (ui/browse.lua : ext.popularFilters) ───────────────
 -- NovelFire expose deux familles de listes, toutes deux couvertes ici :
 --   • les pages de genre  : /genre-<genre>/sort-<tri>/status-<statut>/<pays>
@@ -643,21 +660,48 @@ function ext:parseNovel(path)
             chapters_html:match('<input[^>]*max="(%d+)"[^>]*name="chapno"') or
             chapters_html:match('<input[^>]*name="chapno"[^>]*max="(%d+)"') or "0") or 0
         local total_pages = max_ch > 0 and math.ceil(max_ch / 100) or 1
+        -- Sécurité : si le champ « max » est absent (autre mise en page du site), on
+        -- prend le plus grand numéro de page trouvé dans les liens de pagination.
+        for n in chapters_html:gmatch('[?&]page=(%d+)') do
+            n = tonumber(n)
+            if n and n > total_pages then total_pages = n end
+        end
         logger.dbg("NovelFire: parseNovel max_ch=", max_ch, "total_pages=", total_pages)
 
         chapters = parse_chapter_list_html(chapters_html, novel_url)
         logger.dbg("NovelFire: parseNovel page 1 chapters=", #chapters)
 
+        local failed = {}
         for pg = 2, total_pages do
             logger.dbg("NovelFire: parseNovel fetching chapter page", pg)
-            local pg_html = http_get(chapters_url .. "?page=" .. pg)
-            if pg_html then
-                local more = parse_chapter_list_html(pg_html, novel_url)
+            local more = fetch_chapter_page(chapters_url .. "?page=" .. pg, novel_url, 3)
+            if more then
                 logger.dbg("NovelFire: parseNovel page", pg, "chapters=", #more)
                 for _, ch in ipairs(more) do table.insert(chapters, ch) end
+            else
+                failed[#failed + 1] = pg
             end
         end
-        logger.dbg("NovelFire: parseNovel total chapters=", #chapters)
+
+        -- Une page manquante = liste incomplète : on refuse de renvoyer une liste
+        -- raccourcie (elle écraserait la bonne liste en cache). L'utilisateur peut
+        -- simplement actualiser de nouveau.
+        if #failed > 0 then
+            logger.err("NovelFire: parseNovel liste incomplète, pages manquantes :", table.concat(failed, ","))
+            return nil
+        end
+
+        -- Un chapitre publié pendant le chargement décale les pages : un même
+        -- chapitre peut apparaître deux fois. On retire les doublons.
+        local seen_path, unique = {}, {}
+        for _, ch in ipairs(chapters) do
+            if not seen_path[ch.path] then
+                seen_path[ch.path] = true
+                unique[#unique + 1] = ch
+            end
+        end
+        chapters = unique
+        logger.dbg("NovelFire: parseNovel total chapters=", #chapters, "(attendu", max_ch, ")")
     end
 
     -- Filet de sécurité : si aucun chapitre n'a de chapter_number (ex. site
