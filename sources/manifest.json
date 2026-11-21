@@ -313,6 +313,18 @@
       "icon": "sources/icons/novelninja.png"
     },
     {
+      "id": "novelping",
+      "name": "NovelPing",
+      "lang": "en",
+      "type": "novel",
+      "site": "https://novelping.com",
+      "version": "0.4.1",
+      "license": "GPL-3.0",
+      "lastCheck": "2026-11-21",
+      "file": "sources/novelping.lua",
+      "icon": "sources/icons/novelping.png"
+    },
+    {
       "id": "ranobehub",
       "name": "RanobeHub",
       "lang": "ru",
