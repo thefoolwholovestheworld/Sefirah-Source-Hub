@@ -1,6 +1,6 @@
 {
  "version": 1,
- "updated": "2026-11-15",
+ "updated": "2026-11-21",
  "examples": [
   {
    "id": "wordrain",
@@ -622,6 +622,21 @@
     "type": "manga",
     "list": "/series/",
     "chap": "/chapters/"
+   }
+  },
+  {
+   "id": "novelping",
+   "moteur": "",
+   "type": "novel",
+   "signature": "",
+   "structure": "Fiche /book/<slug>, chapitres /book/<slug>/chapter-N-titre. Liste avec filtres (genres, tags, statut, tri) via /sort/<liste> ou /search?… Avis via l'API JSON /api-web/novels/<slug>/comments.",
+   "pieges": [
+    "Avis : l'API est /api-web/novels/<slug>/comments?scope=all&sort=latest|most-liked|oldest&page=N&limit=10 (pas /api/comments) ; lire items[] (auteur = user.account ou disqusUser.name)",
+    "Ne garder que les commentaires racines : les réponses sont imbriquées dans children",
+    "Couvertures versionnées (?v=…) : retirer le paramètre avant de comparer les liens"
+   ],
+   "config": {
+    "type": "novel"
    }
   }
  ],
