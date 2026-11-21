@@ -1,4 +1,6 @@
--- Beast Novels — v0.2.0 (catalogue lu depuis /novels : vraies couvertures, vrais filtres Tri/Statut/Genres, recherche)
+-- Beast Novels — v0.2.1 (catalogue lu depuis /novels : vraies couvertures, vrais filtres Tri/Statut/Genres, recherche)
+-- v0.2.1 : les chapitres Premium (payants) sont détectés et marqués « verrouillés » au lieu d'être listés
+--          comme lisibles puis de planter en « Texte du chapitre introuvable ». Aucun contournement du paywall.
 local logger = require("logger")
 local BASE   = "https://beastnovels.com"
 local SEARCH = "https://beastnovels.com/?s={q}"
@@ -287,7 +289,7 @@ local function query(term, page, options)
     return { novels = out }
 end
 
-local ext = { id = "beastnovels", name = "Beast Novels", site = BASE, lang = "en", version = "0.2.0",
+local ext = { id = "beastnovels", name = "Beast Novels", site = BASE, lang = "en", version = "0.2.1",
     popularFilters = POPULAR_FILTERS, searchFilters = POPULAR_FILTERS, hasReviews = false, chapterCommentsPanel = false }
 
 -- Relit les genres sur le site à la 1re ouverture de « Filtrer ».
@@ -366,6 +368,61 @@ local function meta(html, path)
     return m
 end
 
+-- Extrait le texte d'un chapitre (nil si absent : chapitre Premium/verrouillé, page vide...).
+local function chapter_body(html)
+    html = html:gsub("<script.-</script>", ""):gsub("<style.-</style>", "")
+    local body = grab(html, CONT)
+    if not body then
+        local ps, n = {}, 0
+        for p in html:gmatch("<p%f[%s>][^>]*>(.-)</p>") do
+            local t = txt(p)
+            if #t > 1 then ps[#ps+1] = "<p>" .. p .. "</p>"; n = n + #t end
+        end
+        if #ps >= 3 and n > 300 then body = table.concat(ps) end
+    end
+    if not body or #body < 50 then return nil end
+    return body
+end
+
+-- true = texte lisible, false = pas de texte, nil = indéterminé (réseau).
+local function chapter_readable(c)
+    local html = get(c.path)
+    if not html then return nil end
+    return chapter_body(html) ~= nil
+end
+
+-- Renvoie l'index (dans la liste triée) du dernier chapitre gratuit, ou nil si indéterminé.
+-- Hypothèse : les chapitres gratuits forment un préfixe (1..N), les Premium viennent après.
+-- Recherche dichotomique : ~log2(N) requêtes, résultat mis en cache 10 min par roman.
+local lock_cache = {}
+local function free_limit(ch, slug, probe)
+    probe = probe or chapter_readable
+    local n = #ch
+    if n < 2 then return nil end
+    local hit = lock_cache[slug]
+    if hit and (os.time() - hit.t) < 600 and hit.n == n then return hit.limit end
+    local last = probe(ch[n])
+    if last == nil then return nil end
+    local limit
+    if last then
+        limit = n                              -- tout est lisible
+    else
+        local first = probe(ch[1])
+        -- si même le chapitre 1 est illisible, la détection n'est pas fiable : on ne verrouille rien
+        if not first then return nil end
+        local lo, hi = 1, n                    -- lo lisible, hi illisible
+        while hi - lo > 1 do
+            local mid = math.floor((lo + hi) / 2)
+            local r = probe(ch[mid])
+            if r == nil then return nil end
+            if r then lo = mid else hi = mid end
+        end
+        limit = lo
+    end
+    lock_cache[slug] = { t = os.time(), n = n, limit = limit }
+    return limit
+end
+
 function ext:parseNovelMeta(path)
     local html = get(path); if not html then return nil end
     local m = meta(html, path); m.total_chapters = 0; return m
@@ -394,26 +451,23 @@ function ext:parseNovel(path)
     end
     table.sort(ch, function(a, b) return (a.chapter_number or 0) < (b.chapter_number or 0) end)
     for i, c in ipairs(ch) do c.chapter_number = i end
+    -- Le site liste aussi les chapitres Premium (onglet « Premium Chapters ») dont le texte
+    -- n'est pas accessible gratuitement : on les marque « verrouillés » (grisés, non ouverts,
+    -- ignorés par les téléchargements/exports). Si la détection est impossible (réseau...),
+    -- on ne verrouille rien : comportement identique à avant.
+    local limit = free_limit(ch, slug_of(path))
+    if limit then for i = limit + 1, #ch do ch[i].locked = true end end
     m.chapters, m.totalPages = ch, 1
     return m
 end
 
 function ext:parseChapter(path)
     local html = get(path); if not html then return "<p>Chapitre injoignable.</p>" end
-    html = html:gsub("<script.-</script>", ""):gsub("<style.-</style>", "")
-    
-    local body = grab(html, CONT) 
-    
+    local body = chapter_body(html)
     if not body then
-        local ps, n = {}, 0
-        for p in html:gmatch("<p%f[%s>][^>]*>(.-)</p>") do
-            local t = txt(p)
-            if #t > 1 then ps[#ps+1] = "<p>" .. p .. "</p>"; n = n + #t end
-        end
-        if #ps >= 3 and n > 300 then body = table.concat(ps) end
+        return "<p>Ce chapitre n'est pas accessible gratuitement (probablement un chapitre Premium de Beast Novels).</p>"
+            .. "<p>This chapter is not freely available (probably a Premium chapter on Beast Novels).</p>"
     end
-    
-    if not body or #body < 50 then return "<p>Texte du chapitre introuvable.</p>" end
     return body
 end
 
