@@ -796,8 +796,14 @@ function ext:parseChapter(path)
     end
     content = content:gsub('%s*Report%s*$', "")
 
-    -- Remove watermarks (elements with any class attribute, as per LightNovelWorldParser)
-    content = content:gsub('<p[^>]*class="[^"]*"[^>]*>.-</p>', "")
+    -- Remove watermarks (paragraphes portant une classe, comme dans LightNovelWorldParser).
+    -- EXCEPTION : sur NovelPhoenix, TOUS les vrais paragraphes du chapitre portent une
+    -- classe générée « svelte-xxxx » (<p class="svelte-9fpgjf">). On les garde, sinon le
+    -- chapitre entier est effacé (écran vide).
+    content = content:gsub('(<p[^>]*class="([^"]*)"[^>]*>.-</p>)', function(whole, cls)
+        if cls:match("^svelte%-") then return whole end
+        return ""
+    end)
     -- Remove nested strong watermarks
     content = content:gsub('<strong><strong>.-</strong></strong>', "")
     -- Collapse whitespace
