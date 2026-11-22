@@ -97,6 +97,18 @@
       "icon": "sources/icons/cenele.png"
     },
     {
+      "id": "chikari",
+      "name": "Chikari",
+      "lang": "en",
+      "type": "manga",
+      "site": "https://chikari.moe",
+      "version": "0.8.1",
+      "license": "GPL-3.0",
+      "lastCheck": "2026-11-22",
+      "file": "sources/chikari.lua",
+      "icon": "sources/icons/chikari.png"
+    },
+    {
       "id": "fmteam",
       "name": "FMTeam",
       "lang": "fr",
