@@ -1,7 +1,10 @@
--- Beast Novels — v0.2.1 (catalogue lu depuis /novels : vraies couvertures, vrais filtres Tri/Statut/Genres, recherche)
+-- Beast Novels — v0.2.2 (catalogue lu depuis /novels : vraies couvertures, vrais filtres Tri/Statut/Genres, recherche)
+-- v0.2.2 : chapitres Premium repérés par leur marqueur sur le site (« ★ 🪙 15 »), sans sonder le réseau.
+--          Les libellés « Chapitre N » sont traduits via core.i18n.
 -- v0.2.1 : les chapitres Premium (payants) sont détectés et retirés de la liste au lieu d'être listés
 --          comme lisibles puis de planter en « Texte du chapitre introuvable ». Aucun contournement du paywall.
 local logger = require("logger")
+local T = require("core.i18n").T
 local BASE   = "https://beastnovels.com"
 local SEARCH = "https://beastnovels.com/?s={q}"
 local LISTP  = "/series/"
@@ -116,6 +119,17 @@ local function is_chapter_href(href)
     local clean = href:gsub("[?#].*$", ""):gsub("/+$", "")
     local last = clean:match("/([^/]+)$")
     return last ~= nil and last:match("^%d+$") ~= nil
+end
+
+-- Chapitre payant : le site affiche un marqueur « ★ 🪙 <prix> » (ou le mot Premium).
+local COIN = "\240\159\170\153"   -- U+1FA99 🪙 (UTF-8)
+local STAR = "\226\152\133"       -- U+2605 ★ (UTF-8)
+local function is_premium_link(tag, inner_html)
+    local t = dec(inner_html or "")
+    if t:find(COIN, 1, true) or t:find(STAR, 1, true) then return true end
+    if t:lower():find("premium", 1, true) then return true end
+    local c = attr(tag, "class") or ""
+    return c:lower():find("premium", 1, true) ~= nil or c:lower():find("locked", 1, true) ~= nil
 end
 
 local function parse_list(html)
@@ -439,23 +453,32 @@ function ext:parseNovel(path)
             if k:sub(1, #base + 1) == base .. "/" and is_chapter_href(href) and not seen[k] then
                 seen[k] = true
                 local num = tonumber(href:match("/(%d+)/*$"))
-                local name = "Chapitre " .. (num or (#ch + 1))
+                local name = T("Chapitre ") .. (num or (#ch + 1))
                 
                 local raw_name = txt(inner_html)
                 local clean_name = raw_name:match("CHAPTER%s*(%d+)") or raw_name:match("^Ch%.%s*(%d+)")
-                if clean_name then name = "Chapitre " .. clean_name end
+                if clean_name then name = T("Chapitre ") .. clean_name end
 
-                ch[#ch+1] = { name = name, path = rel(href), chapter_number = num or (#ch + 1) }
+                ch[#ch+1] = { name = name, path = rel(href), chapter_number = num or (#ch + 1),
+                              premium = is_premium_link(tag, inner_html) }
             end
         end
     end
     table.sort(ch, function(a, b) return (a.chapter_number or 0) < (b.chapter_number or 0) end)
     for i, c in ipairs(ch) do c.chapter_number = i end
-    -- Le site liste aussi les chapitres Premium (onglet « Premium Chapters ») dont le texte
-    -- n'est pas accessible gratuitement : on les retire de la liste. Si la détection est
-    -- impossible (réseau...), on ne retire rien : comportement identique à avant.
-    local limit = free_limit(ch, slug_of(path))
-    if limit then for i = #ch, limit + 1, -1 do ch[i] = nil end end
+    -- Le site liste aussi les chapitres Premium (onglet « Premium Chapters ») : on les retire.
+    -- Priorité au marqueur affiché par le site (fiable). Sans marqueur, repli sur le sondage.
+    local has_premium = false
+    for _, c in ipairs(ch) do if c.premium then has_premium = true; break end end
+    if has_premium then
+        local free = {}
+        for _, c in ipairs(ch) do if not c.premium then free[#free+1] = c end end
+        ch = free
+    else
+        local limit = free_limit(ch, slug_of(path))
+        if limit then for i = #ch, limit + 1, -1 do ch[i] = nil end end
+    end
+    for i, c in ipairs(ch) do c.chapter_number = i end
     m.chapters, m.totalPages = ch, 1
     return m
 end
@@ -464,8 +487,7 @@ function ext:parseChapter(path)
     local html = get(path); if not html then return "<p>Chapitre injoignable.</p>" end
     local body = chapter_body(html)
     if not body then
-        return "<p>Ce chapitre n'est pas accessible gratuitement (probablement un chapitre Premium de Beast Novels).</p>"
-            .. "<p>This chapter is not freely available (probably a Premium chapter on Beast Novels).</p>"
+        return "<p>" .. T("Ce chapitre n'est pas accessible gratuitement (probablement un chapitre Premium de Beast Novels).") .. "</p>"
     end
     return body
 end
