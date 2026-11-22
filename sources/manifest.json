@@ -468,6 +468,18 @@
       "icon": "sources/icons/weebcentral.png"
     },
     {
+      "id": "woopread",
+      "name": "WoopRead",
+      "lang": "en",
+      "type": "novel",
+      "site": "https://woopread.com",
+      "version": "0.2.0",
+      "license": "GPL-3.0",
+      "lastCheck": "2026-11-22",
+      "file": "sources/woopread.lua",
+      "icon": "sources/icons/woopread.png"
+    },
+    {
       "id": "wordrain",
       "name": "Wordrain",
       "lang": "en",
