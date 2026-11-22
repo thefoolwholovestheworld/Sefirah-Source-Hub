@@ -1,6 +1,6 @@
 {
- "version": 1,
- "updated": "2026-11-21",
+ "version": 3,
+ "updated": "2026-11-22",
  "examples": [
   {
    "id": "wordrain",
@@ -104,13 +104,15 @@
    "moteur": "",
    "type": "novel",
    "signature": "",
-   "structure": "WordPress : catalogue /novels ou /series/, texte dans chapter-content.",
+   "structure": "WordPress : catalogue JSON dans /novels (variable Alpine allBooks), texte du chapitre dans chapter-content.",
    "pieges": [
-    "Prendre les vraies couvertures et filtres depuis /novels"
+    "Les chapitres Premium sont marqués « ★ 🪙 prix » sur le site : les exclure de la liste, ne pas tenter de les lire.",
+    "Hypothèse : les chapitres gratuits forment un préfixe (1..N) ; vérifier sur plusieurs œuvres avant de généraliser.",
+    "Prendre les vraies couvertures et filtres depuis /novels (JSON), pas depuis le HTML visible."
    ],
    "config": {
     "type": "novel",
-    "list": "/series/",
+    "list": "/novels",
     "cont": "chapter-content",
     "search": "/?s={q}"
    }
@@ -638,6 +640,60 @@
    "config": {
     "type": "novel"
    }
+  },
+  {
+   "id": "ixdzs8",
+   "moteur": "",
+   "type": "novel",
+   "signature": "",
+   "structure": "Site de romans chinois : recherche /bsearch, liste triée /sort/{genre}/, filtres genre par identifiant numérique.",
+   "pieges": [
+    "Filtres : une valeur vide ou « all » ne doit pas ajouter de paramètre (sinon /sort/{genre}/ perd son genre).",
+    "Les valeurs par défaut des filtres doivent être gardées tant que l'utilisateur n'a rien choisi.",
+    "Les entités HTML (&#x27; &amp; &eacute;) doivent être décodées avant d'afficher le texte.",
+    "Les liens d'images peuvent être encapsulés par /_next/image?url=… : prendre l'URL d'origine."
+   ],
+   "config": {
+    "type": "novel",
+    "list": "/sort/",
+    "search": "/bsearch?q={q}"
+   }
+  },
+  {
+   "id": "mangakatana",
+   "moteur": "",
+   "type": "manga",
+   "signature": "",
+   "structure": "Fiche /manga/<slug>.<id>, chapitre /manga/<slug>.<id>/c<N>. Le lien long est le chapitre, le lien court est l'œuvre.",
+   "pieges": [
+    "Le site fournit des images .avif que KOReader ne lit pas toujours : préférer le .jpg de la balise img.",
+    "La couverture de og:image est en avif : prendre l'img jpg de la fiche.",
+    "Filtres genres inclure/exclure avec mode ET/OU, statut, nombre de chapitres, tri."
+   ],
+   "config": {
+    "type": "manga",
+    "list": "/manga/",
+    "chap": "/c",
+    "search": ""
+   }
+  },
+  {
+   "id": "mangalivre",
+   "moteur": "madara",
+   "type": "manga",
+   "signature": "wp-manga",
+   "structure": "WordPress Madara : filtres construits en paramètres m_orderby, genre[] et status[].",
+   "pieges": [
+    "Filtres Madara : construire genre[]=a&genre[]=b et status[] à partir des seuls choix de l'utilisateur.",
+    "Retirer les paragraphes publicitaires de la description avant affichage.",
+    "Les couvertures peuvent être en lazy-load (data-src) avant src."
+   ],
+   "config": {
+    "type": "manga",
+    "list": "/manga/",
+    "chap": "/capitulo",
+    "search": "/?s={q}&post_type=wp-manga"
+   }
   }
  ],
  "lecons": [
@@ -775,6 +831,201 @@
    "symptome": "htmx|hx-get|hx-trigger|full-chapter-list|Fiche : aucun chapitre|Aucune image|no_pages|chapter_unreachable",
    "cause": "Le site charge ses listes par morceaux de HTML à part (HTMX) : la fiche ne contient que les derniers chapitres et la page d'un chapitre ne contient aucune image.",
    "solution": "Chercher dans le HTML les attributs hx-get / hx-trigger, ouvrir ces adresses à part (ex. /series/<id>/full-chapter-list pour tous les chapitres, /chapters/<id>/images?… pour les images) et lire le HTML qu'elles renvoient."
+  },
+  {
+   "symptome": "Image lazy vide ou couverture manquante|couverture.*vide|src.*pixel",
+   "cause": "Le site charge les images au défilement : le src est un pixel vide ou une image transparente.",
+   "solution": "Lire data-src, data-url ou data-lazy-src avant src ; ignorer les pixels transparents."
+  },
+  {
+   "symptome": "Erreur 403|HTTP 403|liste indisponible \\(HTTP 403\\)|403 sur la liste",
+   "cause": "Le site refuse les requêtes sans en-têtes de navigateur : un bot sans en-têtes reçoit 403.",
+   "solution": "Envoyer les en-têtes qu'un navigateur envoie (User-Agent, Accept, Accept-Language) ; si l'adresse est héritée et répond 403, chercher l'adresse actuelle du classement."
+  },
+  {
+   "symptome": "429|limite de débit|rate.?limit|trop de requêtes",
+   "cause": "Trop de requêtes en peu de temps : le serveur limite le débit.",
+   "solution": "Passer en mode lent (2 à la fois, pause de 0,6 s), reprendre seulement les pages en échec, et borner le nombre d'essais."
+  },
+  {
+   "symptome": "Just a moment|Cloudflare|challenge|page de vérification",
+   "cause": "Une protection Cloudflare bloque l'accès avec une page de vérification JavaScript.",
+   "solution": "Ne pas contourner la protection : afficher le code HTTP et un message clair, et garder l'hébergeur en repli."
+  },
+  {
+   "symptome": "ajax.*403|/ajax/.*(403|échec)",
+   "cause": "L'appel AJAX qui renvoie la liste complète est refusé alors que la page normale fonctionne.",
+   "solution": "Revenir à la pagination HTML : continuer tant que la page suivante contient des liens, et ne pas considérer la liste finie après un échec AJAX."
+  },
+  {
+   "symptome": "liste incomplète|seulement \\d+ chapitres|manque des chapitres|pagination",
+   "cause": "La liste s'arrête après la première page : la pagination n'a pas été suivie.",
+   "solution": "Suivre la pagination jusqu'à une page sans nouveaux liens, et ne jamais écraser une liste complète en cache par une liste partielle."
+  },
+  {
+   "symptome": "chapitres? verrouillé|isPremium|Premium|payant",
+   "cause": "Certains chapitres sont payants ou verrouillés (isPremium, ★ 🪙 prix).",
+   "solution": "Les exclure de la liste lisible. Ne jamais tenter de les contourner, et l'indiquer dans l'interface."
+  },
+  {
+   "symptome": "Chapitre introuvable|texte très court|paragraphes absents",
+   "cause": "Le texte est coupé ou absent parce que le conteneur choisi n'est pas le bon.",
+   "solution": "Choisir la classe qui contient le plus de paragraphes du chapitre, pas un conteneur de page entier ni les commentaires."
+  },
+  {
+   "symptome": "paragraphes dupliqués|texte répété|double espace",
+   "cause": "Le texte contient des paragraphes en double ou des balises restées dans le contenu.",
+   "solution": "Dédupliquer les paragraphes et retirer les balises avant d'afficher le texte."
+  },
+  {
+   "symptome": "entités HTML|&amp;|&#39;|&eacute;|caractères bizarres",
+   "cause": "Les entités HTML (&#39; &amp; &eacute;) apparaissent telles quelles dans le texte.",
+   "solution": "Décoder les entités en une seule passe, après avoir extrait le texte."
+  },
+  {
+   "symptome": "avif|webp|image illisible|format d'image",
+   "cause": "KOReader ne lit pas toujours l'avif (ni le webp) : les images ne s'affichent pas.",
+   "solution": "Préférer le .jpg proposé dans la page, ou une variante jpg/png de la même image."
+  },
+  {
+   "symptome": "Next\\.js|__next_f|_next/image",
+   "cause": "Les données sont dans le JSON de la page Next.js, et les images passent par /_next/image.",
+   "solution": "Lire le JSON de self.__next_f, et prendre l'URL d'origine de l'image (paramètre url=)."
+  },
+  {
+   "symptome": "HTMX|hx-get|hx-trigger|chargement par morceaux",
+   "cause": "La liste ou les chapitres sont chargés à part en HTML (HTMX).",
+   "solution": "Suivre les adresses hx-get pour obtenir la liste complète."
+  },
+  {
+   "symptome": "tri ignoré|tri non respecté|ordre différent à chaque page",
+   "cause": "Le tri demandé n'est pas appliqué, ou change d'une page à l'autre.",
+   "solution": "Ajouter un tiebreak stable (par identifiant) et vérifier le tri sur la première page."
+  },
+  {
+   "symptome": "page hors limites|dernière page en boucle|boucle infinie",
+   "cause": "Le site renvoie la dernière page en boucle au lieu d'une liste vide.",
+   "solution": "Arrêter la pagination quand une page ne contient aucun nouvel identifiant."
+  },
+  {
+   "symptome": "couvertures versionnées|\\?v=|cover.*introuvable",
+   "cause": "La couverture a un paramètre de version (?v=…) qui empêche de la retrouver.",
+   "solution": "Retirer ?v=… de l'adresse avant de comparer les couvertures."
+  },
+  {
+   "symptome": "titre.*\\[Cover\\]|\\[Cover\\]|libellé d'interface|badge",
+   "cause": "Un libellé d'interface (badge, bouton) est pris pour le titre de l'œuvre.",
+   "solution": "Ignorer les libellés connus et prendre le titre de la fiche ou du lien long."
+  },
+  {
+   "symptome": "mauvais nom|nom de la série faux|titre faux",
+   "cause": "Le titre extrait est celui d'une autre œuvre ou d'un élément de navigation.",
+   "solution": "Partir du slug de l'adresse, qui est sans ambiguïté, puis relire le titre juste devant."
+  },
+  {
+   "symptome": "avis absents|avis vides|commentaires introuvables",
+   "cause": "Les avis sont chargés depuis une API séparée, et le conteneur HTML ne les contient pas.",
+   "solution": "Lire les avis depuis l'API de commentaires, en gardant les réponses comme avis distincts."
+  },
+  {
+   "symptome": "description avec pub|texte publicitaire|paragraphe de pub",
+   "cause": "La description contient des paragraphes publicitaires du site.",
+   "solution": "Retirer les paragraphes de publicité avant l'affichage."
+  },
+  {
+   "symptome": "contenu 18\\+|adulte|adult",
+   "cause": "Le contenu 18+ peut apparaître dans les listes ou les étiquettes.",
+   "solution": "Demander le mode sans 18+ à l'API, et ne pas proposer ses étiquettes."
+  },
+  {
+   "symptome": "image.*404|image absente sur le CDN",
+   "cause": "Une image manque sur le CDN alors que la page s'affiche.",
+   "solution": "Tester la première image seulement ; ne considérer comme absent qu'un 404 explicite."
+  },
+  {
+   "symptome": "Lecteur texte.*manga|texte vide pour manga",
+   "cause": "Le lecteur texte est appelé pour un manga, qui n'a que des images.",
+   "solution": "Un manga passe par le lecteur d'images ; le lecteur texte ne doit jamais l'appeler pour un manga."
+  },
+  {
+   "symptome": "nombre de chapitres faux|chapitres en double|chapitres parasites",
+   "cause": "La liste contient des faux chapitres (liens publicitaires, liens externes, doublons).",
+   "solution": "Ne garder que les liens du même domaine qui suivent le motif de chapitre, et dédupliquer par adresse."
+  },
+  {
+   "symptome": "ordre inversé|chapitres dans le mauvais ordre",
+   "cause": "Le site liste les chapitres du plus récent au plus ancien.",
+   "solution": "Vérifier l'ordre sur deux pages ; n'inverser que si l'ordre est démontré."
+  },
+  {
+   "symptome": "gmatch|motif Lua|échappement|caractères spéciaux dans le motif",
+   "cause": "Un motif Lua mal échappé (antislash doublé, accolades dans une description) casse l'extraction ou renvoie un texte faux.",
+   "solution": "Échapper les caractères spéciaux du motif et le tester sur une vraie description contenant des accolades."
+  },
+  {
+   "symptome": "sans User-Agent|requête refusée sans en-tête|User-Agent obligatoire",
+   "cause": "Le site exige un User-Agent explicite et limite le nombre de requêtes par seconde.",
+   "solution": "Envoyer un User-Agent explicite et espacer les requêtes (environ 5 par seconde au maximum)."
+  },
+  {
+   "symptome": "image.*Cloudflare|Just a moment.*image|hébergeur.*Cloudflare|CDN.*403",
+   "cause": "Les images d'un hébergeur renvoient 403 avec une page de vérification Cloudflare.",
+   "solution": "Vérifier la première image avant de lancer le téléchargement, et déclarer l'hébergeur comme risqué pour qu'il reste en dernier recours."
+  },
+  {
+   "symptome": "téléchargement lent|pages en échec|limite de débit du CDN",
+   "cause": "Le CDN limite le débit : un téléchargement rapide fait échouer des pages.",
+   "solution": "Première passe rapide (8 images à la fois), seconde passe lente (2 à la fois, pause de 0,6 s) pour les seules pages en échec."
+  },
+  {
+   "symptome": "miniatures des autres épisodes|vignettes des autres|mauvaises images",
+   "cause": "La page contient des miniatures d'autres épisodes, qui se retrouvent dans les images de lecture.",
+   "solution": "Limiter l'extraction à la zone de lecture, puis filtrer les images par leur place dans la page."
+  },
+  {
+   "symptome": "sous-processus|trop lent|vérification trop longue",
+   "cause": "Vérifier toutes les images une à une rend l'ouverture trop lente.",
+   "solution": "Limiter la vérification aux quatre premières images, qui suffisent à juger la source."
+  },
+  {
+   "symptome": "liste des volumes|tableau chapters|volumes.*chapitres en double",
+   "cause": "Le tableau de chapitres des volumes n'est pas fiable : il contient des entrées absentes ou doublées.",
+   "solution": "Ne pas se fier à ce tableau ; utiliser la liste de chapitres de la fiche."
+  },
+  {
+   "symptome": "tri instable|ordre différent à chaque page|table.sort",
+   "cause": "Le tri de Lua n'est pas stable : les éléments égaux changent d'ordre d'une page à l'autre.",
+   "solution": "Ajouter un critère de départage (identifiant) à chaque tri."
+  },
+  {
+   "symptome": "avis fusionnés|réponses.*parent|réponses comme texte",
+   "cause": "Les réponses à un avis sont ajoutées au texte du parent au lieu d'être affichées à part.",
+   "solution": "Convertir chaque réponse en avis distinct, sans la fusionner avec le parent."
+  },
+  {
+   "symptome": "parse.*toute la page|avis.*mauvaise zone|classe générée",
+   "cause": "L'extraction lit toute la page et ramasse des éléments étrangers (menus, pubs). Les classes générées (svelte-xxxx) changent souvent.",
+   "solution": "Limiter l'analyse au conteneur concerné, et éviter de dépendre d'une classe générée."
+  },
+  {
+   "symptome": "chapitre.*lien long|même préfixe",
+   "cause": "La fiche et le chapitre partagent le même préfixe d'adresse : l'œuvre est le lien court, le chapitre le lien long.",
+   "solution": "Distinguer les deux par leur longueur d'adresse, et ne garder que les liens qui ont le motif de chapitre."
+  },
+  {
+   "symptome": "filtres.*valeur par défaut|/sort/.*genre perd",
+   "cause": "Une valeur de filtre par défaut efface le choix de l'utilisateur dans l'adresse.",
+   "solution": "Ne retirer le paramètre que si l'utilisateur n'a rien choisi ou a choisi « Tous »."
+  },
+  {
+   "symptome": "catalogue entier|initial.*vide|page d'accueil vide",
+   "cause": "Une recherche vide affiche tout le catalogue, ce qui fait planter ou ralentir la liste.",
+   "solution": "Afficher un état vide clair tant que la recherche n'a pas de texte, et ne charger le catalogue qu'à la demande."
+  },
+  {
+   "symptome": "html_to_text|conversion du texte",
+   "cause": "Le convertisseur de texte du lecteur laisse passer des paragraphes ou des balises mal découpés.",
+   "solution": "Vérifier le texte sur un chapitre réel après conversion, et corriger le découpage des paragraphes avant l'affichage."
   }
  ]
 }
