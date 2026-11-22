@@ -694,6 +694,25 @@
     "chap": "/capitulo",
     "search": "/?s={q}&post_type=wp-manga"
    }
+  },
+  {
+   "id": "chikari",
+   "moteur": "sveltekit",
+   "type": "manga",
+   "lang": "en",
+   "signature": "__sveltekit",
+   "structure": "SvelteKit : la page HTML est une coquille vide, tout passe par une API JSON /api/. Liste et recherche /api/series?limit=24&offset=N&q=&sort=popular|top_rated&type=&genre=&tag=&status= (valeurs multiples = clé répétée, à confirmer) ; genres /api/genres?novels=true, tags /api/tags?novels=true ; fiche /api/series/<slug> (title, description, genres, authors, chapter_count, chapters_head/tail) ; chapitres /api/series/<slug>/chapters?order=desc&limit=100&offset=N (100 max, total dans la réponse) ; avis /api/series/<slug>/reviews?limit=20&offset=N&sort=top (champs author, rating sur 10, title, body, body_json, score, created_at).",
+   "pieges": [
+    "Ne pas parser le HTML : lire l'API JSON ; masquer les séries avec is_nsfw=true",
+    "Le JSON null (avatar_url, parent_id, title…) est décodé par rapidjson en valeur truthy : tester type(v)==\"string\" avant tout abs()/:sub(), sinon plantage de l'onglet Avis",
+    "Dans les avis, body laisse les spoilers en clair : reconstruire le texte depuis body_json (marks type spoiler → [spoiler], nœud image → [image])",
+    "Sefirah attend parseReviews(path, page, sort) → { reviews = {author, rating, content, likes, date, avatar, id, parent_id}, has_more } ; sort newest|oldest|mostliked, seul « top » est confirmé côté site",
+    "Les commentaires de série (/comments) mêlent racines et réponses dans la même liste et leur total ne correspond pas : paginer sur le nombre de racines",
+    "Filtres : statut « ongoing » et format des valeurs multiples non confirmés ; ne pas combiner plusieurs ids de tags pour un même terme tapé"
+   ],
+   "config": {
+    "type": "manga"
+   }
   }
  ],
  "lecons": [
@@ -1026,6 +1045,31 @@
    "symptome": "html_to_text|conversion du texte",
    "cause": "Le convertisseur de texte du lecteur laisse passer des paragraphes ou des balises mal découpés.",
    "solution": "Vérifier le texte sur un chapitre réel après conversion, et corriger le découpage des paragraphes avant l'affichage."
+  },
+  {
+   "symptome": "attempt to (index|call|concatenate).*userdata|impossible de charger les avis",
+   "cause": "rapidjson décode le JSON null en une valeur truthy (userdata) : un champ null (avatar_url, parent_id, title) passe « if v » puis fait planter la source.",
+   "solution": "Ne jamais tester un champ JSON par « if v » : exiger type(v)==\"string\" ou \"number\" (helpers str()/num()) avant abs(), :sub() ou tostring()."
+  },
+  {
+   "symptome": "onglet Avis vide|Avis introuvables|impossible de charger les avis|hasReviews",
+   "cause": "Sefirah appelle ext:parseReviews(path, page, sort) et lit { reviews, has_more } ; d'autres noms (hasNext, text, user…) sont ignorés.",
+   "solution": "Renvoyer reviews[] = {id, parent_id, author, avatar, rating, content, likes, date} et has_more ; traduire sort (newest|oldest|mostliked) vers l'API ; ne pas mettre hasReviews = false."
+  },
+  {
+   "symptome": "filtre.*(vide|aucun résultat|incohérent)|genres? multiples?",
+   "cause": "Une API n'accepte pas toujours genre=a&genre=b : certaines veulent genre=a,b, et beaucoup combinent plusieurs valeurs en ET (résultat vide).",
+   "solution": "Rendre le format des valeurs multiples réglable (clé répétée ou virgule) ; tester avec 1 puis 2 valeurs : si la liste devient vide à 2, le site combine en ET."
+  },
+  {
+   "symptome": "tag.*(vide|aucun|incohérent)|recherche de tag",
+   "cause": "Résoudre un terme tapé en plusieurs ids de tags et les envoyer tous ensemble donne une liste vide quand le site combine les tags en ET.",
+   "solution": "Un terme tapé = un seul tag : le nom exact s'il existe, sinon le plus utilisé qui contient le texte, jamais plusieurs."
+  },
+  {
+   "symptome": "spoiler|\\[spoiler\\]|avis.*(spoil|révél)",
+   "cause": "Le champ body brut d'une API d'avis laisse les spoilers en clair ; le balisage est dans body_json (marks de type spoiler).",
+   "solution": "Reconstruire le texte depuis body_json : nœuds marqués spoiler → [spoiler], images → [image], paragraphes séparés par une ligne vide."
   }
  ]
 }
