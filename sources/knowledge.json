@@ -713,6 +713,32 @@
    "config": {
     "type": "manga"
    }
+  },
+  {
+   "id": "woopread",
+   "moteur": "next",
+   "type": "novel",
+   "lang": "en",
+   "signature": "self.__next_f",
+   "structure": "Next.js (app router, flux self.__next_f) mais lu en HTML : liste /browse?language=&status=&genres=&page=N (20 romans par page, « Page 1 of N » dans le HTML) ; fiche /series/<slug> ; chapitre /series/<slug>/chapter-<n> ; recherche par l'API JSON /api/search?q={q} ; avis par l'API JSON /api/novels/{id}/reviews.",
+   "pieges": [
+    "Ne PAS activer le mode Next.js généré : ses clés étaient vides et il écrasait les fonctions HTML qui fonctionnent (garder next absent de la config)",
+    "Texte du chapitre : la classe « space-y-4 » est une classe utilitaire (Tailwind) aussi utilisée par la navigation ; choisir parmi les éléments portant cette classe le plus interne qui garde presque tous les <p>",
+    "Liste complète des chapitres dans le JSON du flux Next.js : {\"id\":…,\"title\":…,\"number\":…,\"slug\":…} (guillemets échappés par une barre oblique inverse à rétablir avant de lire) ; le HTML n'en affiche qu'un groupe",
+    "og:description est mutilée (chevrons perdus) : lire le bloc #novel-description-content de la fiche",
+    "Genres : liens /browse?genres= puis liste complète « tags » dans le JSON Next.js ; filtre genre = paramètre genres, sans « Adult » ni « Smut »",
+    "Couvertures : passer par /_next/image?url=…&w=384&q=75 du site (JPEG léger), puis l'image d'origine WebP en secours (adresses séparées par une tabulation)",
+    "Avis : l'id du roman se lit dans la fiche (novelId, 8 à 40 caractères alphanumériques) puis GET /api/novels/<id>/reviews ; liste dans comments/reviews/items, pas de pagination",
+    "Recherche par API : une seule page, filtres ignorés ; sans texte tapé, retomber sur la liste /browse filtrée"
+   ],
+   "config": {
+    "type": "novel",
+    "list": "/series/",
+    "chap": "chapter-",
+    "cont": "space-y-4",
+    "search": "/api/search?q={q}",
+    "browse": "/browse"
+   }
   }
  ],
  "lecons": [
@@ -1070,6 +1096,11 @@
    "symptome": "spoiler|\\[spoiler\\]|avis.*(spoil|révél)",
    "cause": "Le champ body brut d'une API d'avis laisse les spoilers en clair ; le balisage est dans body_json (marks de type spoiler).",
    "solution": "Reconstruire le texte depuis body_json : nœuds marqués spoiler → [spoiler], images → [image], paragraphes séparés par une ligne vide."
+  },
+  {
+   "symptome": "space-y-4|classe utilitaire|Tailwind|texte.*(menu|navigation)|chapitre.*(menu|bouton)",
+   "cause": "Sur un site Tailwind/Next.js, la classe du texte est souvent une classe utilitaire (space-y-4, prose, container) répétée dans toute la page, donc le premier élément trouvé est la navigation et non le texte.",
+   "solution": "Parmi tous les éléments portant la classe, garder le plus interne qui contient au moins 80 % des <p> du plus riche ; repli : tous les <p> de la page si le texte dépasse 300 caractères."
   }
  ]
 }
