@@ -708,6 +708,10 @@ local function block_to_chapter_comment(block, depth)
     if img then
         avatar = img:match('%ssrc="([^"]+)"') or img:match('data%-src="([^"]+)"')
     end
+    -- RR sert les avatars en .webp (avatar-<uid>.webp) avec un repli .jpg
+    -- côté navigateur (onError). KOReader décode mal le webp : on demande
+    -- directement le .jpg, qui existe à la même adresse.
+    if avatar then avatar = avatar:gsub("%.webp(%?.*)$", ".jpg%1"):gsub("%.webp$", ".jpg") end
     if avatar and avatar:match("anon%.jpg$") then
         avatar = nil
     elseif avatar and avatar:match("^//") then
