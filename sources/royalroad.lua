@@ -734,7 +734,9 @@ local function block_to_chapter_comment(block, depth)
     -- (boutons d'action), balises retirées — pas dans le texte de l'auteur.
     local score
     local tail = body_end and own:sub(body_end) or own
-    local n = strip_tags(tail):match("Rep%s*%(%s*(%-?%d[%d,%.]*)%s*%)")
+    local tail_txt = strip_tags(tail):gsub("&nbsp;", " "):gsub("\194\160", " ")
+    -- "Rep" entier (pas "Reply"/"Report"), puis parenthèse/espaces, puis le nombre.
+    local n = tail_txt:match("%f[%a]Rep%f[%A][^%d%a]*(%-?%d[%d,%.]*)")
     if n then score = tonumber((n:gsub("[,%.]", ""))) end
 
     local replies = {}
@@ -786,13 +788,30 @@ function ext:parseChapterComments(path, page)
     end
 
     local comments = {}
+    local first_raw
     local pos = 1
     while true do
         local inner, next_pos = extract_div(html, COMMENT_OPEN, pos)
         if not inner then break end
+        first_raw = first_raw or inner
         local ok, c = pcall(block_to_chapter_comment, inner, 0)
         if ok and c then comments[#comments + 1] = c end
         pos = next_pos or (#html + 1)
+    end
+
+    -- Diagnostic : des commentaires mais aucun score => on journalise la fin
+    -- du 1er commentaire (zone des boutons) pour voir le vrai balisage.
+    local function has_score(list)
+        for _, c in ipairs(list) do
+            if c.score ~= nil or (c.replies and has_score(c.replies)) then return true end
+        end
+        return false
+    end
+    if #comments > 0 and first_raw and not has_score(comments) then
+        local sub_s = first_raw:find('<ul class="subcomments"', 1, true)
+        local own = sub_s and first_raw:sub(1, sub_s - 1) or first_raw
+        local snippet = own:sub(-700):gsub("%s+", " ")
+        logger.warn("RoyalRoad: commentaires trouves mais aucun score; fin du 1er commentaire:", snippet)
     end
 
     if #comments == 0 and page == 1 then
