@@ -377,9 +377,9 @@
       "lang": "en",
       "type": "novel",
       "site": "https://www.royalroad.com",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "license": "GPL-3.0",
-      "lastCheck": "2026-11-04",
+      "lastCheck": "2026-11-24",
       "file": "sources/royalroad.lua",
       "icon": "sources/icons/royalroad.png"
     },
@@ -466,18 +466,6 @@
       "lastCheck": "2026-11-15",
       "file": "sources/weebcentral.lua",
       "icon": "sources/icons/weebcentral.png"
-    },
-    {
-      "id": "woopread",
-      "name": "WoopRead",
-      "lang": "en",
-      "type": "novel",
-      "site": "https://woopread.com",
-      "version": "0.2.0",
-      "license": "GPL-3.0",
-      "lastCheck": "2026-11-22",
-      "file": "sources/woopread.lua",
-      "icon": "sources/icons/woopread.png"
     },
     {
       "id": "wordrain",
