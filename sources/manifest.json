@@ -384,6 +384,18 @@
       "icon": "sources/icons/royalroad.png"
     },
     {
+      "id": "scrollerspub",
+      "name": "ScrollersPub",
+      "lang": "en",
+      "type": "novel",
+      "site": "https://www.scrollerspub.com",
+      "version": "0.1.4",
+      "license": "GPL-3.0",
+      "lastCheck": "2026-11-25",
+      "file": "sources/scrollerspub.lua",
+      "icon": "sources/icons/scrollerspub.png"
+    },
+    {
       "id": "seanovel",
       "name": "SeaNovel",
       "lang": "ar",
