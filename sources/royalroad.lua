@@ -723,11 +723,19 @@ local function block_to_chapter_comment(block, depth)
     local date = normalize_comment_date(own:match('<time[^>]-datetime="([^"]+)"'))
 
     local content = ""
-    local content_html = extract_div(own, '<div class="comment%-body"')
+    local content_html, body_end = extract_div(own, '<div class="comment%-body"')
     if content_html then
         content_html = content_html:gsub('<br[^>]*/?>%s*', '\n'):gsub('</p>%s*', '\n\n')
         content = strip_tags(content_html):gsub('\n\n\n+', '\n\n'):match("^%s*(.-)%s*$")
     end
+
+    -- Score : le bouton affiche "Rep (86)". Balisage exact non vérifié, donc
+    -- on cherche ce texte dans la partie qui SUIT le corps du commentaire
+    -- (boutons d'action), balises retirées — pas dans le texte de l'auteur.
+    local score
+    local tail = body_end and own:sub(body_end) or own
+    local n = strip_tags(tail):match("Rep%s*%(%s*(%-?%d[%d,%.]*)%s*%)")
+    if n then score = tonumber((n:gsub("[,%.]", ""))) end
 
     local replies = {}
     if sub_s then
@@ -751,6 +759,7 @@ local function block_to_chapter_comment(block, depth)
         avatar  = avatar,
         date    = date,
         id      = id,
+        score   = score,
         depth   = depth,
         replies = (#replies > 0) and replies or nil,
     }
