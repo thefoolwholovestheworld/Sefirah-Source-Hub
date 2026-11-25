@@ -353,7 +353,7 @@ local ext = {
     name    = "Royal Road",
     site    = BASE,
     lang    = "en",
-    version = "1.2.0",
+    version = "1.3.0",
     maxReviews = 150, -- limite d'avis affichés (même valeur pour toutes les extensions) : au-delà, plus de page à droite
     -- Contrairement à novelfrance.lua, qui injecte ses commentaires de fin
     -- de chapitre directement en texte dans le chapitre, cette source
@@ -646,57 +646,124 @@ function ext:parseReviews(path, page, sort)
 end
 
 -- ── Commentaires de chapitre ────────────────────────────────────────────
--- Pas encore confirmé par capture DevTools (contrairement à parseReviews
--- ci-dessus, confirmé le 2026-09-13). RR affiche, sous le texte de chaque
--- chapitre, une section de commentaires paginée classiquement, par
--- analogie avec la pagination `?reviews=N` déjà confirmée pour les avis
--- sur la page fiche : on essaie `?comments=N` sur l'URL du chapitre. Un
--- commentaire suit vraisemblablement le même gabarit Bootstrap que les
--- avis : <div class="comment" id="comment-<id>">...<div class="comment-inner">
--- (par analogie avec class="review" id="review-<id>" / div.review-inner).
--- À ajuster si le HTML réel diffère (même démarche que pour parseReviews :
--- capture DevTools puis correction ciblée).
+-- Les commentaires ne sont PAS dans le HTML de la page du chapitre (qui ne
+-- contient qu'un div.comment-container vide + #comment-loader) : le
+-- navigateur les charge ensuite depuis
+--   GET /fiction/chapter/<chapterId>/commentsLegacy/<page>?sorting=top|newest|oldest
+-- (constaté par capture réseau, cf. issue #8 / Source Hub #2). Chaque page
+-- contient 10 commentaires de premier niveau + toutes leurs réponses ;
+-- "Next ›" n'apparaît que s'il reste une page. Hors limites, la réponse est
+-- <h4>No one has commented yet. Be the first!</h4>.
 --
--- Toujours 10 commentaires par appel (PAGE_SIZE), indépendamment de ce que
--- RR renvoie par page côté serveur.
-local function block_to_chapter_comment(block, id)
-    local author = strip_tags(
-        block:match('<a class="small" href="/profile/%d+">(.-)</a>') or "")
+-- Gabarit d'un commentaire (les réponses sont des div.comment imbriqués dans
+-- ul.subcomments, sur une profondeur quelconque) :
+--   <div class="comment">
+--     <div class="media media-v2 ..." id="comment-container-<id>">
+--       <a id="comment-<id>"></a>
+--       <img data-type="avatar" ... src="...">
+--       <span class="name"><strong><a href="/profile/<uid>">Auteur</a></strong></span>
+--       <time datetime="2018-10-28T21:35:24.0000000&#x2B;00:00">
+--       <div class="comment-body"><p>Texte</p></div>
+--     </div>
+--     <ul class="subcomments"> <div class="comment">...</div> ... </ul>
+--   </div>
+--
+-- Chaque commentaire renvoyé porte un champ optionnel `replies` (même forme,
+-- récursif) que le panneau aplatit avec core/reviewthreads.lua.
 
-    local avatar = block:match('class="img%-circle"[^>]*src="([^"]+)"')
+local COMMENT_SORTING = "top"   -- "top" | "newest" | "oldest"
+local COMMENT_OPEN    = '<div class="comment[%s"]'
+
+local function chapter_id_from_path(path)
+    return tostring(path or ""):match("chapter/(%d+)")
+end
+
+local function normalize_comment_date(raw)
+    if not raw or raw == "" then return nil end
+    raw = raw:gsub("&#x2[Bb];", "+"):gsub("&#43;", "+")
+    -- 2018-10-28T21:35:24.0000000+00:00 -> 2018-10-28T21:35:24+00:00
+    raw = raw:gsub("(%d%d:%d%d:%d%d)%.%d+", "%1")
+    return raw
+end
+
+-- `block` = contenu interne d'un div.comment (sans la balise elle-même).
+-- Retourne un commentaire ou nil ; ses réponses sont parsées récursivement.
+local function block_to_chapter_comment(block, depth)
+    depth = depth or 0
+
+    -- Sépare le commentaire lui-même de ses réponses : tout ce qui précède
+    -- <ul class="subcomments"> est à lui. Sans ça, un commentaire sans lien
+    -- de profil (auteur supprimé) emprunterait l'auteur de sa 1re réponse.
+    local sub_s = block:find('<ul class="subcomments"', 1, true)
+    local own   = sub_s and block:sub(1, sub_s - 1) or block
+
+    local id = own:match('id="comment%-container%-(%d+)"')
+            or own:match('<a id="comment%-(%d+)"')
+
+    local author = strip_tags(
+        own:match('<span class="name">.-<a [^>]-href="/profile/%d+"[^>]*>(.-)</a>') or "")
+
+    local avatar
+    local img = own:match('<img[^>]-data%-type="avatar"[^>]*>')
+    if img then
+        avatar = img:match('%ssrc="([^"]+)"') or img:match('data%-src="([^"]+)"')
+    end
     if avatar and avatar:match("anon%.jpg$") then
         avatar = nil
+    elseif avatar and avatar:match("^//") then
+        avatar = "https:" .. avatar
     elseif avatar and not avatar:match("^https?://") then
         avatar = BASE .. avatar
     end
 
-    local date = block:match('<time[^>]*datetime="([^"]+)"')
+    local date = normalize_comment_date(own:match('<time[^>]-datetime="([^"]+)"'))
 
-    local content_html = extract_div(block, '<div class="comment%-inner"')
-        or extract_div(block, '<div class="media%-body"')
     local content = ""
+    local content_html = extract_div(own, '<div class="comment%-body"')
     if content_html then
         content_html = content_html:gsub('<br[^>]*/?>%s*', '\n'):gsub('</p>%s*', '\n\n')
         content = strip_tags(content_html):gsub('\n\n\n+', '\n\n'):match("^%s*(.-)%s*$")
     end
 
-    if author == "" and content == "" then return nil end
+    local replies = {}
+    if sub_s then
+        local rest = block:sub(sub_s)
+        local pos = 1
+        while true do
+            local inner, next_pos = extract_div(rest, COMMENT_OPEN, pos)
+            if not inner then break end
+            local ok, r = pcall(block_to_chapter_comment, inner, depth + 1)
+            if ok and r then replies[#replies + 1] = r end
+            pos = next_pos or (#rest + 1)
+        end
+    end
+
+    -- Un commentaire vide mais avec des réponses reste affiché (sinon les
+    -- réponses disparaîtraient avec lui).
+    if author == "" and content == "" and #replies == 0 then return nil end
     return {
         author  = author ~= "" and author or "Anonyme",
         content = content,
         avatar  = avatar,
         date    = date,
         id      = id,
+        depth   = depth,
+        replies = (#replies > 0) and replies or nil,
     }
 end
 
 function ext:parseChapterComments(path, page)
     page = tonumber(page) or 1
     if page < 1 then page = 1 end
-    local PAGE_SIZE = 10
 
-    local url = (path:match("^https?://") and path) or (BASE .. "/" .. path)
-    url = url .. (url:find("?") and "&" or "?") .. "comments=" .. tostring(page)
+    local chapter_id = chapter_id_from_path(path)
+    if not chapter_id then
+        logger.err("RoyalRoad: parseChapterComments — id de chapitre introuvable dans", tostring(path))
+        return { comments = {}, has_more = false }
+    end
+
+    local url = BASE .. "/fiction/chapter/" .. chapter_id
+        .. "/commentsLegacy/" .. tostring(page) .. "?sorting=" .. COMMENT_SORTING
 
     logger.dbg("RoyalRoad: parseChapterComments page=", page, "url=", url)
     local html = http_get(url)
@@ -707,22 +774,22 @@ function ext:parseChapterComments(path, page)
 
     local comments = {}
     local pos = 1
-    while #comments < PAGE_SIZE do
-        local s = html:find('<div class="comment" id="comment%-%d+"', pos)
-        if not s then break end
-        local id = html:match('id="comment%-(%d+)"', s)
-        local block, next_pos = extract_div(html, '<div class="comment" id="comment%-%d+"', pos)
-        if not block then break end
-        local ok, c = pcall(block_to_chapter_comment, block, id)
+    while true do
+        local inner, next_pos = extract_div(html, COMMENT_OPEN, pos)
+        if not inner then break end
+        local ok, c = pcall(block_to_chapter_comment, inner, 0)
         if ok and c then comments[#comments + 1] = c end
         pos = next_pos or (#html + 1)
     end
 
-    -- Pagination : présence d'un lien "Next ›" (même marqueur que pour les
-    -- avis, cf. parseReviews plus haut).
+    if #comments == 0 and page == 1 then
+        logger.warn("RoyalRoad: parseChapterComments — 0 commentaire extrait pour", url)
+    end
+
+    -- "Next ›" n'apparaît que s'il existe une page suivante.
     local has_more = html:find("Next &rsaquo;", 1, true) ~= nil
 
-    return { comments = comments, has_more = has_more, page = page }
+    return { comments = comments, has_more = has_more, page = page, next_page = page + 1 }
 end
 
 return ext
