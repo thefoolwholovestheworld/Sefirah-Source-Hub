@@ -157,6 +157,18 @@
       "icon": "sources/icons/kakuyomu.png"
     },
     {
+      "id": "knoxt",
+      "name": "KnoxT",
+      "lang": "en",
+      "type": "novel",
+      "site": "https://knoxt.space",
+      "version": "0.2.0",
+      "license": "GPL-3.0",
+      "lastCheck": "2026-11-28",
+      "file": "sources/knoxt.lua",
+      "icon": "sources/icons/knoxt.png"
+    },
+    {
       "id": "lightnovelvf",
       "name": "LightNovelVF",
       "lang": "fr",
@@ -299,6 +311,18 @@
       "lastCheck": "2026-11-04",
       "file": "sources/novelfull.lua",
       "icon": "sources/icons/novelfull.png"
+    },
+    {
+      "id": "noveli",
+      "name": "Noveli.to",
+      "lang": "en",
+      "type": "novel",
+      "site": "https://noveli.to",
+      "version": "0.2.0",
+      "license": "GPL-3.0",
+      "lastCheck": "2026-11-28",
+      "file": "sources/noveli.lua",
+      "icon": "sources/icons/noveli.png"
     },
     {
       "id": "novelmania",
