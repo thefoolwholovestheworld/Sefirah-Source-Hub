@@ -1,6 +1,6 @@
 {
  "version": 3,
- "updated": "2026-11-22",
+ "updated": "2026-11-28",
  "examples": [
   {
    "id": "wordrain",
@@ -739,6 +739,52 @@
     "search": "/api/search?q={q}",
     "browse": "/browse"
    }
+  },
+  {
+   "id": "knoxt",
+   "moteur": "themesia",
+   "type": "novel",
+   "lang": "en",
+   "signature": "themes/lightnovel",
+   "structure": "WordPress, thème « Lightnovel » de Themesia (pas Madara). Œuvre = /<slug>/ et chapitre = /<slug>-chapter-N/, tous deux à la racine, un seul segment : on les distingue par « -chapter- » dans l'adresse. Liste /series/?page=N&order=popular&status=&genre[]=&type[]= (cartes dans div.listupd) ; recherche /?s={q}&paged={page} ; fiche : titre h1.entry-title, résumé div[itemprop=description], genres div.genxed, auteur « <b>Author:</b> », statut « <b>Status:</b> » ; liste des chapitres dans div.eplister (epl-num, epl-title), du plus récent au plus ancien ; texte du chapitre dans div.epcontent.",
+   "pieges": [
+    "Ne lire que div.listupd : la barre latérale (populaires, derniers commentaires) contient aussi des liens d'œuvres et les ajouterait à la liste",
+    "Couvertures : le src est un pixel base64 (Jetpack lazy) ; lire data-lazy-src ou data-src ; les images i0.wp.com/…?resize=151,215 se retrouvent en bonne taille en remplaçant resize=300,430",
+    "Chapitres listés du plus récent au plus ancien : inverser puis numéroter",
+    "Retirer du texte les paragraphes Ko-fi / Patreon / PayPal (courts) et les séparateurs « * * * » restés en fin de chapitre ; couper le résumé avant <p style=\"text-align: center\">",
+    "Filtres : les cases « checked » du formulaire reflètent la requête en cours, pas les valeurs par défaut ; ne pas les reprendre comme défauts",
+    "Genres et types : ~290 genres, étiquettes parfois préfixées par « | » (retirer) et une entrée parasite « Remove term: … » dans Type (ignorer) ; certains doublons orthographiques (Comdey, Entertaiment circle) sont de vrais genres du site",
+    "Valeurs de type déjà percent-encodées (ex. %e2%81%b8) : ne pas les encoder une seconde fois (sinon %25e2…) ; genre[] et type[] se répètent une fois par valeur choisie",
+    "Le site n'applique pas de filtres à la recherche /?s= : ne déclarer des filtres que pour la liste",
+    "Page au-delà de la fin : HTTP en erreur plutôt que liste vide ; page > 1 en échec = fin de liste, pas une erreur"
+   ],
+   "config": {
+    "type": "novel",
+    "chap": "-chapter-",
+    "cont": "epcontent",
+    "search": "/?s={q}&paged={page}"
+   }
+  },
+  {
+   "id": "noveli",
+   "moteur": "api-json",
+   "type": "novel",
+   "lang": "en",
+   "signature": "/api/novels",
+   "structure": "API JSON, pas de HTML à parser. Liste /api/novels?page=N&limit=24&genre=&status=&search= (réponse { data: [ { slug, title, cover_image } ] }) ; fiche /api/novels/<slug> (title, description, author, status, genres, chapter_count, id) ; chapitres /api/novels/<slug>/chapters?page=N (chapters[], pagination.totalPages) ; texte /api/novels/<id œuvre>/chapters/<id chapitre> → chapter.paragraphs[] (html, text, isHoneypot, isWatermark).",
+   "pieges": [
+    "Le texte d'un chapitre ne s'obtient pas avec les slugs seuls : il faut l'id numérique de l'œuvre et celui du chapitre ; les garder dans l'adresse du chapitre (?id=…&nid=…) et, si nid manque (liste en cache), le relire dans la fiche",
+    "Ignorer les paragraphes isHoneypot et isWatermark ainsi que celui dont le html contient « watermark-notice » (texte piège ou filigrane anti-copie)",
+    "Des espaces de largeur nulle (U+200B, U+200C, U+200D, U+FEFF) sont glissés dans le texte : les retirer, sinon coupures de mots et recherche cassée",
+    "rapidjson décode le JSON null en valeur truthy : passer chaque champ par une fonction str() (type(v)==\"string\") avant de l'utiliser",
+    "Couverture « default.jpg » = pas de couverture ; auteur « Unknown Author » = vide ; le résumé commence par « Summary » et finit par « Show More » : les retirer",
+    "Chapitres paginés (totalPages) : boucler jusqu'à la dernière page, dédoublonner par slug, puis trier par chapter_number (l'ordre de l'API n'est pas fiable)",
+    "Filtres : les valeurs de statut sont avec majuscule (Ongoing, Completed) et le genre est son libellé exact (Martial Arts, Slice of Life) ; les mêmes filtres servent à la recherche",
+    "Prévoir plusieurs adresses candidates pour le texte (par ids, par slug de chapitre, par numéro, /api/chapters/<id>) et afficher celles essayées quand tout échoue"
+   ],
+   "config": {
+    "type": "novel"
+   }
   }
  ],
  "lecons": [
@@ -1101,6 +1147,41 @@
    "symptome": "space-y-4|classe utilitaire|Tailwind|texte.*(menu|navigation)|chapitre.*(menu|bouton)",
    "cause": "Sur un site Tailwind/Next.js, la classe du texte est souvent une classe utilitaire (space-y-4, prose, container) répétée dans toute la page, donc le premier élément trouvé est la navigation et non le texte.",
    "solution": "Parmi tous les éléments portant la classe, garder le plus interne qui contient au moins 80 % des <p> du plus riche ; repli : tous les <p> de la page si le texte dépasse 300 caractères."
+  },
+  {
+   "symptome": "barre latérale|œuvres parasites|populaires.*liste|derniers commentaires|liste.*(trop|plus) longue|Accueil : \\d+ œuvres? dont",
+   "cause": "Les liens de la barre latérale (séries populaires, derniers commentaires) ressemblent à des liens d'œuvres et sont ramassés avec la vraie liste.",
+   "solution": "Isoler d'abord la zone de résultats (ex. div.listupd sur un thème Themesia) et n'extraire les liens que dans cette zone ; garder la page entière seulement en dernier recours."
+  },
+  {
+   "symptome": "%25[0-9a-fA-F]{2}|valeur de filtre.*(encod|%)|filtre.*(aucun résultat|vide).*type|double encodage",
+   "cause": "Une valeur de filtre du site est déjà percent-encodée (ex. %e2%81%b8) et l'encoder une seconde fois donne %25e2… que le site ne reconnaît pas.",
+   "solution": "Encoder les valeurs avec une fonction qui laisse intact le caractère % ; répéter genre[]= / type[]= pour chaque valeur choisie."
+  },
+  {
+   "symptome": "Remove term|libellé.*préfixé|genres? parasites?|filtre.*«\\s*\\|",
+   "cause": "La liste de filtres lue sur le formulaire du site contient des entrées parasites (« Remove term: … ») ou des libellés préfixés par « | », et les cases « checked » reflètent la page lue, pas des défauts.",
+   "solution": "Ignorer les libellés qui commencent par « Remove term », retirer le préfixe « | », ne jamais reprendre les cases cochées comme valeurs par défaut (défaut = « Tous » / vide)."
+  },
+  {
+   "symptome": "data-lazy-src|jetpack-lazy-image|i0\\.wp\\.com|resize=\\d+,\\d+|couverture.*(pixel|gif|base64)",
+   "cause": "Jetpack charge les images en différé : le src est un pixel base64 et la vraie adresse est dans data-lazy-src ; l'adresse Photon (i0.wp.com) fixe aussi la taille avec resize=.",
+   "solution": "Lire dans l'ordre data-src, data-lazy-src, data-original, src (en rejetant data:) ; pour une grande couverture, remplacer resize=151,215 par resize=300,430."
+  },
+  {
+   "symptome": "honeypot|watermark|filigrane|caractères invisibles|espaces? de largeur nulle|mots coupés|texte piège",
+   "cause": "Le site glisse des paragraphes pièges (isHoneypot, isWatermark) et des caractères invisibles (U+200B/200C/200D/FEFF) pour empêcher la copie ; ils polluent le texte et cassent la recherche.",
+   "solution": "Écarter les paragraphes marqués honeypot ou watermark (ou dont le html contient watermark-notice) et supprimer les caractères de largeur nulle avant d'afficher le chapitre."
+  },
+  {
+   "symptome": "Texte introuvable\\. Adresses essayées|pas de champ chapter|chapitre vide.*api|404.*api/novels/.*/chapters",
+   "cause": "L'API de texte demande l'id numérique de l'œuvre et celui du chapitre ; les slugs seuls donnent 404 ou un chapitre vide.",
+   "solution": "Mémoriser id et nid dans l'adresse du chapitre au moment de lister les chapitres, retrouver nid via la fiche s'il manque, et tester plusieurs adresses candidates en notant celles qui ont échoué."
+  },
+  {
+   "symptome": "page.*(404|erreur).*(fin|dernière)|liste.*page 2.*échec|Site injoignable.*page [2-9]",
+   "cause": "Le site répond par une erreur HTTP, et non par une liste vide, quand on demande une page après la dernière.",
+   "solution": "Si page > 1 et que la requête échoue, renvoyer une liste vide (fin de liste) ; ne montrer « Site injoignable » que pour la page 1."
   }
  ]
 }
